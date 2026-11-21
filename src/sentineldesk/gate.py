@@ -50,7 +50,7 @@ def evaluate(
         top1 = precedents[0].score
         if top1 < min_top1:
             reasons.append(
-                f"No sufficiently similar precedent (best match {top1:.3f} < {min_top1:.3f})"
+                f"No sufficiently similar precedent (best match {top1:.4f} < {min_top1:.4f})"
             )
         top3 = [p.score for p in precedents[:3]]
         mean3 = sum(top3) / len(top3)

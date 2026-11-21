@@ -18,8 +18,9 @@ EMBED_DIM = 384
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
 
-LLM_MODEL = "gemini-3.8-flash"   # P2.1: 2.5-flash is closed to new keys (404)
+LLM_MODEL = "gemini-3.5-flash-lite"   # P2.1: 2.5-* are retired (404); 3.5-flash 504s on capacity
 LLM_MAX_TOKENS = 1024
+LLM_TIMEOUT_MS = 20000   # past this, fall back to extractive rather than stall the UI
 
 # --- triage classifier (Track A) ------------------------------------------------
 # Frozen on the KB validation slice (docs/p1_workdone.md): word TF-IDF || e5 query embedding.

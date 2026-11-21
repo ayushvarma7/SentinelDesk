@@ -22,7 +22,7 @@ from sentineldesk.generate import unsupported_figures
 from sentineldesk.pipeline import triage
 
 N = int(os.getenv("SD_DRAFT_N", "10"))
-WORKERS = int(os.getenv("SD_DRAFT_WORKERS", "8"))
+WORKERS = int(os.getenv("SD_DRAFT_WORKERS", "3"))   # 8 triggers 504s on the capacity-limited model
 PLACEHOLDER = re.compile(r"<[A-Za-z_][A-Za-z_0-9 -]{1,20}>"
                          r"|\[(?!(?:TKT|LIVE)-\d{5}\])[A-Za-z_][A-Za-z_0-9 -]{1,20}\]")
 
