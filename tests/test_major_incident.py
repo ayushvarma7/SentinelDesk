@@ -10,6 +10,8 @@ the holdout. Scored on:
   * false alarms: do one-off tickets ever get grouped or promoted?
   * known history: does a core problem link to a known KB Problem record?
 """
+import os as _os, tempfile as _tempfile  # keep test/demo tickets out of the real problem database
+_os.environ.setdefault("SD_DB_PATH", _tempfile.mkdtemp(prefix="sd_db_") + "/scratch.db")
 import itertools
 import sys
 from pathlib import Path

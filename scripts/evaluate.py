@@ -17,7 +17,7 @@ import json
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, classification_report, f1_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 
 from sentineldesk import classify, config, embed  # noqa: F401  (embed used in pipeline_section)
 from sentineldesk.data import build_text, load_test_inputs, load_test_labels
@@ -67,6 +67,7 @@ def pipeline_section(inputs, labels) -> dict:
         r = triage(t["subject"], t["body"], track_burst=False)
         rows.append({
             "escalated": r.escalate,
+            "status": r.status,
             "drafted": bool(r.draft_reply),
             "true_high_incident": g["priority"] == "high" and g["type"] == "Incident",
             "top1_sim": r.precedents[0].score if r.precedents else 0.0,
@@ -98,6 +99,11 @@ def pipeline_section(inputs, labels) -> dict:
         "cross_lingual_share_unaided": round(float(df["cross_lingual_unaided"].mean()), 4),
         # Escalated tickets skip the LLM entirely, so an overall p50 flatters the
         # system. The number that matters for the demo is the drafted one.
+        # three-tier outcome (gate.decide) and how often an operator gets a draft to work with
+        "status_share": {s: round(float((df["status"] == s).mean()), 4)
+                         for s in ("AUTO_DRAFT_READY", "HUMAN_REVIEW", "ESCALATE_ONCALL")},
+        "draft_share": round(float(df["drafted"].mean()), 4),
+        "high_incident_sent_oncall": round(float((hi["status"] == "ESCALATE_ONCALL").mean()), 4) if len(hi) else None,
         "latency_ms_p50_all": round(float(df["latency_ms"].quantile(0.50)), 1),
         "latency_ms_p95_all": round(float(df["latency_ms"].quantile(0.95)), 1),
         "latency_ms_p50_drafted": round(float(auto["latency_ms"].quantile(0.50)), 1) if len(auto) else None,
@@ -125,6 +131,20 @@ def main() -> None:
                   "accuracy": round(accuracy_score(y, lab), 4),
                   "ece": round(ece(conf, (y == lab).astype(float)), 4)}
         print(f"\n=== {h} ===\n" + classification_report(y, lab, digits=3, zero_division=0))
+
+    # Confusion matrices (rows = true, columns = predicted) and per-language macro-F1, for the dashboard.
+    order = {"priority": ["high", "medium", "low"], "type": ["Incident", "Problem", "Request", "Change"],
+             "language": ["en", "de"]}
+    res["confusion"] = {}
+    for h in ("type", "priority", "queue"):
+        labs = order.get(h) or sorted(set(labels[h]) | set(pred[h][0]))
+        res["confusion"][h] = {"labels": labs,
+                               "matrix": confusion_matrix(labels[h].to_numpy(), pred[h][0], labels=labs).tolist()}
+    lang = labels["language"].to_numpy()
+    res["per_language"] = {lg: {"n": int((lang == lg).sum()),
+                                **{h: round(f1_score(labels[h].to_numpy()[lang == lg], pred[h][0][lang == lg],
+                                                     average="macro"), 4) for h in ("type", "queue", "priority")}}
+                           for lg in ("en", "de")}
 
     true_hi = (labels["priority"].to_numpy() == "high") & (labels["type"].to_numpy() == "Incident")
     pred_hi = pred["priority"][0] == "high"

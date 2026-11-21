@@ -488,8 +488,14 @@ def load_metrics() -> dict | None:
         "n_test": m["n_holdout"],
         **{h: m[h] for h in ("type", "queue", "priority", "language") if h in m},
         "high_priority_incident_recall": hi.get("recall_gate_hard_rule", hi.get("recall_predicted_high")),
-        "latency_ms": {"p50": pipe.get("latency_ms_p50_all"), "p95": pipe.get("latency_ms_p95_all")},
+        "latency_ms": {"p50": pipe.get("latency_ms_p50_all"), "p95": pipe.get("latency_ms_p95_all"),
+                       "p50_drafted": pipe.get("latency_ms_p50_drafted")},
         "confusion": m.get("confusion") or {},
+        # extra real numbers from scripts/evaluate.py (Track A)
+        "high_incident_recall_classifier": hi.get("recall_predicted_high"),
+        "high_incident_support": hi.get("support"),
+        "per_language": m.get("per_language") or {},
+        "pipeline": pipe,
     }
 
 
@@ -524,6 +530,7 @@ def render_triage(res: dict, show_draft: bool = True, draft_key: str = "draft"):
     c[4].metric("Latency", f"{lat:,.0f} ms")
     if res.get("pii_found"):
         st.caption(f"Masked before processing: {', '.join(res['pii_found'])}")
+    render_problem(res.get("problem"))
 
     left, right = st.columns(2)
     if show_draft:
@@ -540,6 +547,25 @@ def render_triage(res: dict, show_draft: bool = True, draft_key: str = "draft"):
     with (right if show_draft else left):
         st.markdown("**Matching past tickets**")
         render_retrieved(res.get("retrieved", []))
+
+
+def render_problem(p: dict | None):
+    """Where this ticket sits in the problem database (Track A, store.py)."""
+    if not p:
+        return
+    if p["is_new"]:
+        badge("warn", f"New problem: added to the problem database as #{p['problem_id']}")
+    else:
+        state = "resolved" if p["status"] == "resolved" else "still open"
+        badge("esc" if p["occurrences"] >= 3 and p["status"] != "resolved" else "ok",
+              f"Known problem #{p['problem_id']} ({state}), reported {p['occurrences']} times. "
+              f"Closest match {p['similarity']:.2f}")
+        if p.get("resolution"):
+            st.caption(f"Earlier resolution: {p['resolution'][:300]}")
+    if p.get("related"):
+        st.caption("Most related problems already in the database: " + "; ".join(
+            f"#{x['problem_id']} {x['title'][:50]} ({x['similarity']:.2f}, {x['occurrences']}x, {x['status']})"
+            for x in p["related"]))
 
 
 def render_retrieved(items: list[dict]):

@@ -174,7 +174,7 @@ def triage(subject: str | None, body: str | None,
     latency["generate"] = (time.perf_counter() - t) * 1000
     latency["total"] = (time.perf_counter() - t0) * 1000
 
-    return TriageResult(
+    result = TriageResult(
         language=preds["language"].label,
         type=preds["type"],
         queue=preds["queue"],
@@ -193,6 +193,24 @@ def triage(subject: str | None, body: str | None,
         root_cause=root_cause,
         engine=engine,
     )
+
+    # Track A: log every LIVE triage and match-or-add its problem in the database (store.py).
+    # Evaluation passes track_burst=False and is never recorded. Attacks and empty tickets are
+    # logged but not registered as problems. A database error must never break triage.
+    if track_burst and config.DB_ENABLED:
+        try:
+            from . import store
+            hard = set(result.risks) & set(gate.HARD_RISKS)
+            register = qvec is not None and not hard and not gate.too_little_text(text) \
+                and len(text.split()) >= config.ROOT_CAUSE_MIN_WORDS
+            t = time.perf_counter()
+            result.problem = store.record(result, qvec, pii.mask(subject or "")[0], pii.mask(body or "")[0],
+                                          register=register)
+            latency["store"] = (time.perf_counter() - t) * 1000
+        except Exception as e:  # noqa: BLE001
+            latency["store_error"] = 1.0
+            print(f"[store] not recorded: {type(e).__name__}: {e}")
+    return result
 
 
 def triage_ticket(subject: str | None, body: str | None,
@@ -283,4 +301,13 @@ def resolve_ticket(subject: str | None, body: str | None, resolution: str,
     ticket_id = retrieve.add_precedent(subject=subject, body=body, answer=resolution,
                                        language=language, queue=queue, type_=type_,
                                        resolved_by=resolved_by)
-    return {"ticket_id": ticket_id, "indexed": True, "live_count": retrieve.live_count()}
+    problem_id = None
+    if config.DB_ENABLED and STAGES["embed"]:         # Track A: mark the problem resolved in the database
+        try:
+            from . import embed, store
+            problem_id = store.mark_resolved(embed.encode([build_text(subject, body)], is_query=True)[0],
+                                             resolution, resolved_by, precedent_id=ticket_id)
+        except Exception as e:  # noqa: BLE001
+            print(f"[store] resolution not recorded: {type(e).__name__}: {e}")
+    return {"ticket_id": ticket_id, "indexed": True, "live_count": retrieve.live_count(),
+            "problem_id": problem_id}

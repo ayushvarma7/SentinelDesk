@@ -4,6 +4,7 @@ Announce changes to the team — every track imports this.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +56,14 @@ ROOT_CAUSE_GROUP_SIM_SAME_QUEUE = None
 # What raises the major-incident banner: "root_cause" (grouping above, 3+ issues) or "burst"
 # (P3's burst.py: direct cosine >= BURST_SIM to 2 earlier tickets of any type).
 MAJOR_INCIDENT_SOURCE = "root_cause"
+
+# --- problem database (Track A, store.py) -------------------------------------------
+# SQLite log of every live triage + registry of distinct problems. Git-ignored (artifacts/).
+DB_PATH = Path(os.getenv("SD_DB_PATH", str(ARTIFACTS / "sentineldesk.db")))
+DB_ENABLED = os.getenv("SD_DB", "1") == "1"
+PROBLEM_MATCH_SIM = ROOT_CAUSE_GROUP_SIM     # same problem (precision 1.00 in tests/test_major_incident.py)
+PROBLEM_RELATED_MIN_SIM = 0.80               # also show stored problems at least this similar
+PROBLEM_RELATED_K = 3
 ROOT_CAUSE_MIN_GROUP = 3             # this many similar live issues -> suggest raising a Problem
 ROOT_CAUSE_WINDOW_MIN = 30           # live issues older than this drop out of grouping
 ROOT_CAUSE_MIN_WORDS = 3             # too-short tickets ("help", emoji) are never grouped

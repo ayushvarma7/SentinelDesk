@@ -11,6 +11,8 @@ Pass rules:
     [False, False, True, False] at config.BURST_SIM. The script also prints the burst_sim range
     that would give that result, which is how BURST_SIM was tuned.
 """
+import os as _os, tempfile as _tempfile  # keep test/demo tickets out of the real problem database
+_os.environ.setdefault("SD_DB_PATH", _tempfile.mkdtemp(prefix="sd_db_") + "/scratch.db")
 import sys
 
 import numpy as np

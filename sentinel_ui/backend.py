@@ -51,6 +51,13 @@ def triage_ticket(subject: str | None, body: str) -> dict:
             "known_problem": rc.known_problem.ticket_id if rc.known_problem else None,
             "known_change": rc.known_change.ticket_id if rc.known_change else None},
         "engine": r.engine,
+        # Track A problem database (store.py): matched an existing problem or added a new one
+        "problem": None if r.problem is None else {
+            "problem_id": r.problem.problem_id, "is_new": r.problem.is_new, "title": r.problem.title,
+            "occurrences": r.problem.occurrences, "status": r.problem.status,
+            "resolution": r.problem.resolution, "similarity": r.problem.similarity,
+            "related": [{"problem_id": x.problem_id, "title": x.title, "similarity": x.similarity,
+                         "occurrences": x.occurrences, "status": x.status} for x in r.problem.related]},
         "latency_ms": {"triage": round(lat.get("embed", 0) + lat.get("classify", 0), 1),
                        "retrieval": round(lat.get("retrieve", 0), 1),
                        "generation": round(lat.get("generate", 0), 1),
