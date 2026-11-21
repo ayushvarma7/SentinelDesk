@@ -18,7 +18,7 @@ EMBED_DIM = 384
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
 
-LLM_MODEL = "claude-haiku-5-5"      # switch to claude-sonnet-5-5 if German quality disappoints
+LLM_MODEL = "gemini-2.5-flash"      # team plan is Gemini (GDG event); P2.1 checks it against the live list
 LLM_MAX_TOKENS = 1024
 
 # --- triage classifier (Track A) ------------------------------------------------
@@ -31,7 +31,9 @@ HIGH_PRIORITY_TARGET_RECALL = 0.80   # P(high) threshold is the highest one reac
 HIGH_PRIORITY_THRESHOLD = 0.25       # value tuned by scripts/train_classifier.py (also stored in heads.joblib)
 VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).permutation(len(kb)); gate tuning reuses it
 
-# --- retrieval --------------------------------------------------------------
+# --- retrieval (Track B / P2) -----------------------------------------------
+KB_EMB_PATH = ARTIFACTS / "kb_embeddings.npy"        # KB encoded with is_query=False, for retrieval
+KB_META_PATH = ARTIFACTS / "kb_meta.parquet"         # same row order as KB_EMB_PATH
 TOP_K = 5
 DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected
 

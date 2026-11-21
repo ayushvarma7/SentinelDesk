@@ -16,7 +16,7 @@ from .schema import Precedent, Prediction, TriageResult
 STAGES = {
     "embed": True,       # Track A wired embed.encode (Track B owns the file)
     "classify": True,    # Track A: falls back to the stub if artifacts/heads.joblib is missing
-    "retrieve": False,
+    "retrieve": True,    # Track B: real index, stub fallback if artifacts are missing
     "generate": False,
 }
 
@@ -72,7 +72,14 @@ def triage(subject: str | None, body: str | None,
     latency["classify"] = (time.perf_counter() - t) * 1000
 
     t = time.perf_counter()
-    precedents = _stub_precedents()      # TODO Track B
+    if STAGES["retrieve"] and qvec is not None:
+        from . import retrieve
+        if retrieve.is_ready():
+            precedents = retrieve.search(qvec, config.TOP_K, preds["queue"].label)
+        else:
+            precedents = _stub_precedents()   # index not built yet
+    else:
+        precedents = _stub_precedents()
     latency["retrieve"] = (time.perf_counter() - t) * 1000
 
     escalate, reasons = gate.evaluate(
