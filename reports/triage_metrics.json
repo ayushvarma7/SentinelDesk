@@ -25,6 +25,12 @@
   "high_priority_incident": {
     "support": 995,
     "recall_predicted_high": 0.8523,
-    "recall_predicted_high_and_incident": 0.7729
+    "recall_predicted_high_and_incident": 0.7729,
+    "recall_gate_hard_rule": 0.8503,
+    "gate_hard_rule_types": [
+      "Incident",
+      "Problem"
+    ],
+    "share_of_tickets_hard_escalated": 0.3419
   }
 }

@@ -189,6 +189,37 @@ The thresholds in `config.py` were set before any model existed:
 Tune on the same validation slice the classifier held out (`RandomState(42).permutation(len(kb))[:2286]`). The saved
 heads were trained without those rows, so the confidences there are honest.
 
+## 6b. Root-cause grouping (added after the first push)
+
+`src/sentineldesk/rootcause.py` (Track A) follows the ITIL model:
+
+```
+Request  "I need a laptop"            -> fulfilled, no root cause
+Incident "Outlook not working"    ┐
+Incident "Can't receive mails"    ├─ many -> one  Problem "Outlook mail sync broken" ── fixed by ─> Change(s)
+Incident "Outlook keeps crashing" ┘
+```
+
+| Piece | What it does | Evidence |
+|---|---|---|
+| Critical rule | `gate.py` hard rule now fires on high + **Incident or Problem** (`config.CRITICAL_TYPES`) | Validation recall 0.803 → **0.882**; share escalated by this rule 26.2% → 36.5%. Holdout: 0.7729 → **0.8503** (34.2% escalated) |
+| Live grouping | `rootcause.GROUPER` links each new issue to live issues from the last 30 min at sim ≥ 0.89; 3+ → gate reason *"Probable shared root cause … raise a Problem record"* | 0.89 is just above the p90 of unrelated KB issue pairs (0.891). Test: 3 EN Outlook tickets group, invoice/VPN/printer stay separate; a German Outlook ticket joins through a bridging ticket |
+| Known history | Closest KB Problem and Change shown if sim ≥ 0.92 | 0.92 is about the p99 of unrelated pairs (0.917). At 0.88 vague tickets linked to off-topic problems, so they now show nothing. The detailed task-sync ticket links correctly (TKT-08224, 0.933) |
+
+Contract changes, all backwards compatible:
+- `schema.RootCause` is new.
+- `TriageResult.root_cause` is optional and defaults to None.
+- `gate.evaluate(..., root_cause=None)` takes a new optional argument.
+
+Latency is about 3–5 ms per ticket, plus about 190 ms once while the KB index loads.
+
+Decision for the gate owner: the critical rule's escalation volume (36% on validation) is above the scaffold's 15–25%
+target. Recall versus volume is a product call. To revert, set `CRITICAL_TYPES = ("Incident",)`.
+
+Limits:
+- The dataset has no Incident → Problem links, so grouping accuracy can't be scored, only demonstrated.
+- Grouping is per process, in memory, and resets on restart.
+
 ## 7. Open items
 
 | Item | Owner | Blocked on |

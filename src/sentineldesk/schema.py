@@ -29,6 +29,19 @@ class Precedent:
 
 
 @dataclass
+class RootCause:
+    """ITIL grouping: many Incidents share one Problem (root cause); Changes fix Problems."""
+    group_ticket_ids: list[str]            # live issues (incl. this one) that look like the same root cause
+    suggest_problem: bool                  # group reached config.ROOT_CAUSE_MIN_GROUP
+    known_problem: Precedent | None = None # closest historical Problem ticket in the KB
+    known_change: Precedent | None = None  # closest historical Change ticket in the KB
+
+    @property
+    def group_size(self) -> int:
+        return len(self.group_ticket_ids)
+
+
+@dataclass
 class TriageResult:
     """Everything the console renders for one incoming ticket."""
     language: str
@@ -47,6 +60,8 @@ class TriageResult:
 
     masked_pii: dict[str, int]             # {"email": 2, "ip": 1}
     latency_ms: dict[str, float]           # embed / classify / retrieve / generate / total
+
+    root_cause: RootCause | None = None    # set for Incident/Problem tickets (Track A); optional, so old callers still work
 
     @property
     def overall_confidence(self) -> float:

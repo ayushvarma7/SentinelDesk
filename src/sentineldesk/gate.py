@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 
 from . import config
-from .schema import Precedent, Prediction
+from .schema import Precedent, Prediction, RootCause
 
 _ACTION_RE = [re.compile(p, re.I) for p in config.UNSUPPORTED_ACTION_PATTERNS]
 _INJECTION_RE = [re.compile(p, re.I) for p in config.PROMPT_INJECTION_PATTERNS]
@@ -21,6 +21,7 @@ def evaluate(
     priority: Prediction,
     precedents: list[Precedent],
     thresholds: dict | None = None,
+    root_cause: RootCause | None = None,
 ) -> tuple[bool, list[str]]:
     """Return (escalate, reasons). Reasons are empty iff escalate is False."""
     t = thresholds or {}
@@ -31,8 +32,10 @@ def evaluate(
     reasons: list[str] = []
 
     # 1. The brief's hard rule. EDA: fires on 17.2% of tickets on its own.
-    if priority.label == "high" and type_.label == "Incident":
-        reasons.append("Critical incident (high priority + Incident) — on-call required")
+    #    Incident and Problem both mean "service is broken" (Problem = the root cause of incidents),
+    #    and the classifier confuses them, so both count (config.CRITICAL_TYPES).
+    if priority.label == "high" and type_.label in config.CRITICAL_TYPES:
+        reasons.append(f"Critical issue (high priority + {type_.label}) — on-call required")
 
     # 2. Low classifier confidence on any head.
     for name, pred in (("type", type_), ("queue", queue), ("priority", priority)):
@@ -61,6 +64,11 @@ def evaluate(
         evidence = " ".join(p.answer.lower() for p in precedents)
         if not any(r.search(evidence) for r in _ACTION_RE):
             reasons.append("Requests an action with no supporting historical precedent")
+
+    # 5b. Several live issues share one root cause: likely a wider outage, needs a Problem record.
+    if root_cause is not None and root_cause.suggest_problem:
+        reasons.append(f"Probable shared root cause: {root_cause.group_size} similar issues in the last "
+                       f"{config.ROOT_CAUSE_WINDOW_MIN} min — raise a Problem record")
 
     # 6. Out of scope / adversarial.
     if any(r.search(text) for r in _INJECTION_RE):

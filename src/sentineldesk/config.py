@@ -31,6 +31,21 @@ HIGH_PRIORITY_TARGET_RECALL = 0.80   # P(high) threshold is the highest one reac
 HIGH_PRIORITY_THRESHOLD = 0.25       # value tuned by scripts/train_classifier.py (also stored in heads.joblib)
 VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).permutation(len(kb)); gate tuning reuses it
 
+# --- root cause (Track A, ITIL: many Incidents -> one Problem -> fixed by Changes) ----
+# Incident vs Problem is a relationship, not a wording difference (712 of 760 type errors are
+# Incident<->Problem), so the critical-escalation rule treats both as "service is broken".
+# Validation: high-priority Incident recall 0.803 (Incident only) -> 0.882 (Incident or Problem).
+CRITICAL_TYPES = ("Incident", "Problem")
+# Similarity (e5 query vectors) above which two issues are treated as the same root cause.
+# Calibrated on KB issue pairs from different queues with no shared tag: p90=0.891, p99=0.917.
+ROOT_CAUSE_GROUP_SIM = 0.89
+ROOT_CAUSE_MIN_GROUP = 3             # this many similar live issues -> suggest raising a Problem
+ROOT_CAUSE_WINDOW_MIN = 30           # live issues older than this drop out of grouping
+ROOT_CAUSE_MIN_WORDS = 3             # too-short tickets ("help", emoji) are never grouped
+# Show a known KB Problem/Change only above the p99 of unrelated pairs: at 0.88-0.91, short vague
+# tickets ("Outlook down") linked to off-topic problems (crash assistance, Mailchimp sync).
+ROOT_CAUSE_LINK_MIN_SIM = 0.92
+
 # --- retrieval --------------------------------------------------------------
 TOP_K = 5
 DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected

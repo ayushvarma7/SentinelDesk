@@ -21,6 +21,7 @@ src/sentineldesk/        the package (import with PYTHONPATH=src)
   data.py, text.py       data access (leakage-safe) and build_text()
   embed.py               e5 encoder with query:/passage: prefixes          [Track B]
   classify.py            triage heads                                       [Track A, done]
+  rootcause.py           ITIL root-cause grouping + known Problem/Change    [Track A, done]
   retrieve.py            KB index + search                                  [Track B, todo]
   generate.py            grounded draft + citation verification             [Track C, todo]
   gate.py, pii.py        escalation rules, PII masking
@@ -29,6 +30,7 @@ scripts/
   train_classifier.py    trains the triage heads, tunes the P(high) threshold
   evaluate.py            holdout metrics (the only reader of test labels)
 tests/test_contract.py   edge cases that must never crash
+tests/test_rootcause.py  root-cause grouping and KB linking
 notebooks/01_eda.ipynb   EDA (KB split only)
 docs/p1_workdone.md      Track A results + takeover guide for retrieval/generation
 ```
@@ -52,6 +54,7 @@ PYTHONPATH=src python tests/test_contract.py
 | PII masking, escalation gate | rules in place; thresholds still need tuning (see [docs/p1_workdone.md §6](docs/p1_workdone.md#6-findings-the-gate-owner-must-act-on)) |
 | Embed | live: `multilingual-e5-small`, about 11 ms per ticket after warm-up |
 | Classify | live: frozen model, metrics below |
+| Root cause | live: groups similar live issues (suggests a Problem at 3+), links known KB Problems/Changes |
 | Retrieve | stub, Track B |
 | Generate | stub, Track C |
 
@@ -75,11 +78,32 @@ PYTHONPATH=src python tests/test_contract.py
 | ECE type / queue / priority / language | 0.050 / 0.144 / 0.039 / n/a | 0.028 / 0.012 / 0.082 / 0.003 |
 | High-priority Incident recall: predicted high (n=995) | 0.8563 | 0.8523 |
 | High-priority Incident recall: predicted high **and** Incident | 0.7658 | **0.7729** |
-| High-priority Incident recall: escalated by gate | pending (needs retrieval + generation) | |
+| High-priority Incident recall: gate hard rule (high + Incident **or Problem**) | n/a | **0.8503** (escalates 34% of tickets) |
+| High-priority Incident recall: full gate | pending (needs retrieval + generation) | |
 | Latency p50 / p95 | pending | |
 
 Priority ECE rises because the recall-oriented threshold labels tickets with P(high) as low as 0.25 as `high`.
 The trade is deliberate: a missed outage costs more than a false alarm.
+
+## Root-cause grouping (ITIL)
+
+Support work follows the ITIL model: a **Request** asks for something ("I need a laptop"), an **Incident** reports something
+broken, and many Incidents share one **Problem** (the root cause), which is fixed by **Changes**.
+`src/sentineldesk/rootcause.py` uses this model in three ways:
+
+- **Critical rule covers Problems too.** Incident and Problem differ by relationship, not wording (712 of 760 type errors
+  are Incident ↔ Problem), so the gate's hard rule fires on *high + (Incident or Problem)*. On validation this raises
+  high-priority Incident recall from 0.803 to 0.882, while the share of tickets this rule escalates goes from 26% to 37%.
+  To revert, set `config.CRITICAL_TYPES = ("Incident",)`.
+- **Live grouping.** Each new issue is compared with live issues from the last 30 minutes. Three or more at cosine
+  similarity ≥ 0.89 (just above the 90th percentile of unrelated pairs) escalate with *"Probable shared root cause — raise a
+  Problem record"*. Grouping works across languages: three English Outlook tickets and a German one group together, and
+  an invoice ticket stays out.
+- **Known history.** The closest past Problem and Change tickets in the KB are shown when similarity is ≥ 0.92 (99th
+  percentile of unrelated pairs). Vague tickets show nothing rather than a wrong link.
+
+The dataset has no explicit Incident → Problem links, so these thresholds come from similarity distributions, not
+labelled groups. Tests: `PYTHONPATH=src python tests/test_rootcause.py`.
 
 ## Leakage guarantees
 

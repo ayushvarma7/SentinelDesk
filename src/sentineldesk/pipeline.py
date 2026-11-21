@@ -75,8 +75,16 @@ def triage(subject: str | None, body: str | None,
     precedents = _stub_precedents()      # TODO Track B
     latency["retrieve"] = (time.perf_counter() - t) * 1000
 
+    # Root cause (Track A): only for issues (Incident/Problem), only with a real embedding.
+    root_cause = None
+    t = time.perf_counter()
+    if qvec is not None and preds["type"].label in config.CRITICAL_TYPES:
+        from . import rootcause
+        root_cause = rootcause.analyze(qvec, text)
+    latency["root_cause"] = (time.perf_counter() - t) * 1000
+
     escalate, reasons = gate.evaluate(
-        text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds
+        text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, root_cause
     )
 
     t = time.perf_counter()
@@ -101,4 +109,5 @@ def triage(subject: str | None, body: str | None,
         unverified_claims=unverified,
         masked_pii=masked_counts,
         latency_ms=latency,
+        root_cause=root_cause,
     )
