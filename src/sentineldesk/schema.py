@@ -48,6 +48,10 @@ class TriageResult:
     masked_pii: dict[str, int]             # {"email": 2, "ip": 1}
     latency_ms: dict[str, float]           # embed / classify / retrieve / generate / total
 
+    # Added by P3 (defaults keep every existing constructor call valid).
+    risks: list[str] = field(default_factory=list)       # gate.detect_risks(): "prompt_injection", ...
+    burst: dict = field(default_factory=dict)            # {"active", "related", "live_id", "max_sim"}
+
     @property
     def overall_confidence(self) -> float:
         """A ticket is only as trustworthy as its least certain head."""

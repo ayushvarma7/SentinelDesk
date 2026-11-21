@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 
 from . import config, gate, pii
+from .burst import BurstDetector
 from .text import build_text
 from .schema import Precedent, Prediction, TriageResult
 
@@ -19,6 +20,11 @@ STAGES = {
     "retrieve": False,
     "generate": False,
 }
+
+
+# Live-ticket memory for the major-incident banner (P3). Scripts call BURST.clear()
+# between evaluation tickets so they do not trigger it.
+BURST = BurstDetector()
 
 
 def _stub_predictions() -> dict[str, Prediction]:
@@ -75,8 +81,9 @@ def triage(subject: str | None, body: str | None,
     precedents = _stub_precedents()      # TODO Track B
     latency["retrieve"] = (time.perf_counter() - t) * 1000
 
+    burst = BURST.check(qvec, sim=(thresholds or {}).get("burst_sim"))
     escalate, reasons = gate.evaluate(
-        text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds
+        text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst
     )
 
     t = time.perf_counter()
@@ -101,4 +108,6 @@ def triage(subject: str | None, body: str | None,
         unverified_claims=unverified,
         masked_pii=masked_counts,
         latency_ms=latency,
+        risks=gate.detect_risks(text),
+        burst=burst,
     )

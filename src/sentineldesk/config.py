@@ -39,14 +39,21 @@ DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already
 # EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is
 # already the top of the 15-25% target band. Keep the soft thresholds tight or the
 # overall escalation rate balloons past 40% and the copilot looks useless.
-# Tune these in scripts/evaluate.py, do not guess them.
+# Owned by P3. Chosen by scripts/gate_sweep.py on the 10% KB validation slice (never the holdout)
+# with a rule fixed before the sweep: >=95% of high-priority Incidents escalated, >=25% auto-drafted,
+# then max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 26.5% auto-drafted,
+# 95.3% of high Incidents escalated, auto-drafted queue accuracy 0.827 vs 0.609 overall.
 MIN_CONFIDENCE = {
-    "type": 0.50,
-    "queue": 0.45,      # 10 classes at 21x imbalance, so expect lower confidence here
-    "priority": 0.55,   # EDA says priority is weakly predictable; this may need lowering
+    "type": 0.35,
+    "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
+    "priority": 0.60,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
 }
-MIN_TOP1_SIMILARITY = 0.72
-MIN_MEAN_TOP3_SIMILARITY = 0.65
+# e5 query->passage cosine on the KB index sits in a narrow high band (p5 0.912, p25 0.931).
+# These are the validation p25 of top-1 and mean top-3 similarity. They assume Track B's index is
+# config.EMBED_MODEL with "passage: " KB vectors (artifacts/kb_embeddings.npy); re-run
+# scripts/gate_sweep.py if retrieval changes model, prefixes or scoring.
+MIN_TOP1_SIMILARITY = 0.9305
+MIN_MEAN_TOP3_SIMILARITY = 0.9224
 
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [
@@ -58,6 +65,21 @@ UNSUPPORTED_ACTION_PATTERNS = [
     r"\bwire transfer\b", r"\büberweisung\b",
 ]
 
+# --- safety gate (P3) ------------------------------------------------------
+# Risk regexes live in gate.RISK_PATTERNS (owned by P3, tested by tests/test_adversarial.py).
+MIN_LETTERS = 3                      # fewer letters than this (emoji only, bare URL) -> human
+
+# Burst / major-incident detector (burst.py). A ticket is part of a burst when at least
+# BURST_MIN_COUNT tickets (itself included) within BURST_WINDOW_S have pairwise cosine
+# >= BURST_SIM to it. e5 query-vs-query cosines sit in a narrow high band, so this is high.
+# Tuned by scripts/attack_table.py: the German VPN ticket scores 0.884 against the English
+# ones and the invoice ticket 0.795, so any value in (0.795, 0.88] works; 0.86 keeps margin
+# on both sides (0.90 missed the cross-lingual ticket).
+BURST_SIM = 0.86
+BURST_MIN_COUNT = 3
+BURST_WINDOW_S = 30 * 60
+
+# Legacy list, kept for anything that still imports it; the gate uses gate.RISK_PATTERNS.
 PROMPT_INJECTION_PATTERNS = [
     r"ignore (all |your |the )?(previous|prior|above) instructions",
     r"disregard (all |your |the )?(previous|prior|above)",
