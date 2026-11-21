@@ -80,6 +80,12 @@ DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already
 # over. 0 disables; evaluation passes 0 so metrics measure unaided retrieval.
 CROSS_LINGUAL_SLOTS = 1
 
+# Hybrid search (Track A): weight of the keyword (TF-IDF cosine) ranking in reciprocal-rank fusion
+# with the e5 ranking. 0 = dense only. Displayed scores and gate floors stay e5 cosine.
+# Chosen by scripts/hybrid_check.py on the KB validation slice.
+HYBRID_LEXICAL_WEIGHT = 0.0
+KB_LEX_PATH = ARTIFACTS / "kb_tfidf.npz"            # keyword index, row-aligned with KB_META_PATH
+
 # --- escalation gate --------------------------------------------------------
 # EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is
 # already the top of the 15-25% target band. Keep the soft thresholds tight or the

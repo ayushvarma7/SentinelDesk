@@ -156,14 +156,66 @@ def _row_to_precedent(row: pd.Series, score: float) -> Precedent:
     )
 
 
+# --------------------------------------------------------------------------
+# Hybrid search (Track A): keyword cosine (TF-IDF) fused with embedding cosine.
+#
+# e5 captures the topic but can drop the one keyword that matters ("VPN keeps dropping ... for our
+# hospital staff" returned hospital *security* tickets). Reciprocal-rank fusion (RRF) of the two
+# rankings decides WHICH precedents are picked; every returned score is still the e5 cosine, so the
+# gate's similarity floors keep their calibration. HYBRID_LEXICAL_WEIGHT = 0 restores dense-only.
+# --------------------------------------------------------------------------
+_LEX: dict | None = None
+RRF_K = 60
+
+
+def load_lexical() -> dict | None:
+    """TF-IDF index over the frozen KB, row-aligned with kb_meta. Built once (~10 s), then cached."""
+    global _LEX
+    if _LEX is None:
+        import joblib
+        from scipy import sparse
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        meta = load_index()["meta"]
+        vec_path, mat_path = config.KB_LEX_PATH.with_suffix(".joblib"), config.KB_LEX_PATH
+        if vec_path.exists() and mat_path.exists():
+            vec, mat = joblib.load(vec_path), sparse.load_npz(mat_path)
+            if mat.shape[0] != len(meta):
+                vec = mat = None
+        else:
+            vec = mat = None
+        if vec is None:
+            texts = [build_text(s_, b_) for s_, b_ in zip(meta["subject"], meta["body"])]
+            vec = TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=200_000, sublinear_tf=True)
+            mat = vec.fit_transform(texts).tocsr()
+            config.ARTIFACTS.mkdir(parents=True, exist_ok=True)
+            joblib.dump(vec, vec_path)
+            sparse.save_npz(mat_path, mat)
+        _LEX = {"vec": vec, "matrix": mat.tocsr()}
+    return _LEX
+
+
+def _ranks(scores: np.ndarray) -> np.ndarray:
+    """1-based rank of every element, highest score = 1."""
+    order = np.argsort(-scores, kind="stable")
+    r = np.empty(len(scores), dtype=np.int64)
+    r[order] = np.arange(1, len(scores) + 1)
+    return r
+
+
 def _candidates(store: dict, q: np.ndarray, k: int, queue_filter: str | None,
-                exclude_language: str | None = None):
-    """Top candidates from one store as a list of (score, row_index).
+                exclude_language: str | None = None, lex_scores: np.ndarray | None = None,
+                hybrid: bool = False):
+    """Top candidates from one store as a list of (rank_key, cosine, row_index), best first.
 
     exclude_language restricts the search to rows NOT in that language, which
     is how the cross-lingual slots find anything: the unrestricted top-30 for a
     German query is usually 30 German tickets, so a reserved slot has nothing
     to put in it unless we search the other language's rows directly.
+
+    hybrid=False: rank_key is the cosine itself (the original behaviour).
+    hybrid=True : rank_key is the RRF score; lex_scores (keyword cosine per row) adds a second
+                  ranking when available. A store without a keyword index (the live store) gets
+                  an RRF key from its dense ranking alone, so keys stay comparable across stores.
     """
     matrix, meta = store["matrix"], store["meta"]
     if len(matrix) == 0:
@@ -187,16 +239,26 @@ def _candidates(store: dict, q: np.ndarray, k: int, queue_filter: str | None,
             rows = mask
 
     pool = min(len(rows), max(k * 6, 30))
-    local = np.argpartition(-sims[rows], kth=pool - 1)[:pool]
-    local = local[np.argsort(-sims[rows][local])]
-    return [(float(sims[i]), int(i)) for i in rows[local]]
+    dense = sims[rows]
+    if not hybrid:
+        local = np.argpartition(-dense, kth=pool - 1)[:pool]
+        local = local[np.argsort(-dense[local])]
+        return [(float(sims[i]), float(sims[i]), int(i)) for i in rows[local]]
+
+    key = 1.0 / (RRF_K + _ranks(dense))
+    if lex_scores is not None:
+        key = key + config.HYBRID_LEXICAL_WEIGHT / (RRF_K + _ranks(lex_scores[rows]))
+    local = np.argpartition(-key, kth=pool - 1)[:pool]
+    local = local[np.argsort(-key[local])]
+    return [(float(key[j]), float(dense[j]), int(rows[j])) for j in local]
 
 
 def search(query_vec: np.ndarray, k: int | None = None,
            queue_filter: str | None = None,
            include_live: bool = True,
            language: str | None = None,
-           cross_lingual_slots: int | None = None) -> list[Precedent]:
+           cross_lingual_slots: int | None = None,
+           query_text: str | None = None) -> list[Precedent]:
     """Top-k precedents across the frozen KB and the live store, best first.
 
     Vectors are L2-normalized, so the dot product is cosine similarity.
@@ -213,15 +275,22 @@ def search(query_vec: np.ndarray, k: int | None = None,
     written in English — not genuine cross-lingual matching.
     """
     k = k or config.TOP_K
+    # Hybrid ranking needs the ticket text; callers that pass only a vector get dense-only search.
+    hybrid = bool(query_text) and config.HYBRID_LEXICAL_WEIGHT > 0
+    lex = None
+    if hybrid:
+        L = load_lexical()
+        lex = (L["matrix"] @ L["vec"].transform([query_text]).T).toarray().ravel()
     slots = config.CROSS_LINGUAL_SLOTS if cross_lingual_slots is None else cross_lingual_slots
     q = np.asarray(query_vec, dtype=np.float32).reshape(-1)
 
     frozen = load_index()
-    pools = [(frozen, s, i) for s, i in _candidates(frozen, q, k, queue_filter)]
+    pools = [(frozen, key, s, i) for key, s, i in _candidates(frozen, q, k, queue_filter,
+                                                             lex_scores=lex, hybrid=hybrid)]
     if include_live:
         live = load_live()
-        pools += [(live, s, i) for s, i in _candidates(live, q, k, queue_filter)]
-    pools.sort(key=lambda t: -t[1])
+        pools += [(live, key, s, i) for key, s, i in _candidates(live, q, k, queue_filter, hybrid=hybrid)]
+    pools.sort(key=lambda t: -t[1])          # by rank key (= cosine unless hybrid)
 
     def lang_of(store, i):
         return str(store["meta"].iloc[i].get("language") or "")
@@ -239,7 +308,7 @@ def search(query_vec: np.ndarray, k: int | None = None,
         return True
 
     reserve = slots if (language and slots) else 0
-    for store, score, i in pools:
+    for store, _key, score, i in pools:
         if len(picked) >= k - reserve:
             break
         try_add(store, score, i)
@@ -247,19 +316,20 @@ def search(query_vec: np.ndarray, k: int | None = None,
     # Fill the reserved places with the best other-language precedents, then
     # top up with same-language ones if the KB has none to offer.
     if reserve:
-        other = [(frozen, s2, i) for s2, i in
-                 _candidates(frozen, q, slots, None, exclude_language=language)]
+        other = [(frozen, key, s2, i) for key, s2, i in
+                 _candidates(frozen, q, slots, None, exclude_language=language,
+                             lex_scores=lex, hybrid=hybrid)]
         if include_live:
-            other += [(live, s2, i) for s2, i in
-                      _candidates(live, q, slots, None, exclude_language=language)]
+            other += [(live, key, s2, i) for key, s2, i in
+                      _candidates(live, q, slots, None, exclude_language=language, hybrid=hybrid)]
         other.sort(key=lambda t: -t[1])
-        for store, score, i in other:
+        for store, _key, score, i in other:
             if len(picked) >= k:
                 break
             if any(j == i and st is store for st, _, j in picked):
                 continue
             try_add(store, score, i)
-        for store, score, i in pools:
+        for store, _key, score, i in pools:
             if len(picked) >= k:
                 break
             try_add(store, score, i)
