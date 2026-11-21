@@ -1,121 +1,214 @@
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, LabelList } from 'recharts'
-import { Activity, Gauge, ShieldAlert, Target } from 'lucide-react'
-import type { Metrics } from '../api'
+// Rebuild of Poornima's "Operations dashboard" (views/dashboard.py) on our API.
+// Totals/recall come from GET /metrics; everything else is computed client-side from GET /tickets.
+import { useMemo, type ReactNode } from 'react'
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Info } from 'lucide-react'
+import type { Metrics, Ticket } from '../api'
 import { useT } from '../i18n'
-import { Card, Skeleton } from '../ui'
+import { Skeleton } from '../ui'
+import { MetricCard, PageHeader, StatStrip } from '../components/kit'
 
-// Validated (dataviz validate_palette.js, light): red / amber / green pass CVD + normal-vision checks.
-// Amber is < 3:1 against white, so the donut carries visible labels and a legend.
-const PRIO_COLOR: Record<string, string> = { high: '#D93F35', medium: '#E0A021', low: '#2E9E5B' }
-const NAVY = '#1E3A66'
-const AXIS = { fontSize: 12, fill: '#64748b' }
+// Her altair scales, verbatim: priority = NU red / amber / slate grey; type = Streamlit's categorical theme.
+const PRI = ['high', 'medium', 'low'] as const
+const PRI_COLOR: Record<string, string> = { high: '#C8102E', medium: '#E2A33B', low: '#9AA6B5' }
+const TYPES = ['Change', 'Incident', 'Problem', 'Request'] as const
+const TYPE_COLOR: Record<string, string> = { Change: '#0068C9', Incident: '#83C9FF', Problem: '#FF2B2B', Request: '#FFABAB' }
+const AXIS = { fontSize: 11, fill: '#5A6A7E' }
+const GRID = '#E8ECF1'
 
-export default function Dashboard({ m }: { m: Metrics | null }) {
+const pct = (v: number | null | undefined, digits = 1) => (v == null || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(digits)}%`)
+const ms = (v: number | null) => (v == null ? '—' : `${Math.round(v).toLocaleString()} ms`)
+function quantile(xs: number[], q: number) {
+  if (!xs.length) return null
+  const s = [...xs].sort((a, b) => a - b)
+  const pos = (s.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos)
+  return s[lo] + (s[hi] - s[lo]) * (pos - lo)
+}
+/** "reds" sequential: light → deep NU red, by share of the max cell. */
+function reds(t: number) {
+  const a = [254, 229, 217], b = [165, 15, 21]
+  const k = Math.max(0, Math.min(1, t))
+  return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`
+}
+
+function ChartTitle({ children }: { children: ReactNode }) {
+  return <div className="mb-2 text-[13px] font-semibold text-ink">{children}</div>
+}
+function Panel({ children }: { children: ReactNode }) {
+  return <div className="rounded-xl border border-line bg-white p-5">{children}</div>
+}
+function TipBox({ active, payload, label, total }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string; total?: boolean }) {
+  if (!active || !payload?.length) return null
+  const sum = payload.reduce((s, p) => s + (p.value || 0), 0)
+  return (
+    <div className="rounded-lg border border-line bg-white px-3 py-2 text-xs shadow-lg">
+      <div className="mb-1 font-semibold text-ink">{label}</div>
+      {payload.map(p => (
+        <div key={p.name} className="flex items-center gap-2 text-ink">
+          <span className="h-2 w-2 rounded-sm" style={{ background: p.color }} />{p.name}
+          <span className="ml-auto pl-4 font-medium tabular-nums">{p.value}{total && sum ? ` (${Math.round(p.value / sum * 100)}%)` : ''}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export default function Dashboard({ m, tickets }: { m: Metrics | null; tickets: Ticket[] }) {
   const t = useT()
-  if (!m) return (
+
+  const d = useMemo(() => {
+    const n = tickets.length
+    const high = tickets.filter(x => x.priority === 'high').length
+    const hiInc = tickets.filter(x => x.priority === 'high' && x.type === 'Incident').length
+    const de = tickets.filter(x => x.language === 'de').length
+
+    const qMap = new Map<string, Record<string, number>>()
+    for (const x of tickets) {
+      const r = qMap.get(x.queue) ?? { high: 0, medium: 0, low: 0 }
+      r[x.priority] = (r[x.priority] ?? 0) + 1
+      qMap.set(x.queue, r)
+    }
+    const volTeam = [...qMap].map(([queue, r]) => ({ queue, ...r, total: r.high + r.medium + r.low })).sort((a, b) => b.total - a.total)
+
+    const cells = TYPES.flatMap(ty => PRI.map(p => ({ ty, p, n: tickets.filter(x => x.type === ty && x.priority === p).length })))
+    const maxCell = Math.max(1, ...cells.map(c => c.n))
+
+    const typeLang = (['de', 'en'] as const).map(l => ({
+      language: l, ...Object.fromEntries(TYPES.map(ty => [ty, tickets.filter(x => x.language === l && x.type === ty).length])),
+    }))
+
+    const tagCount = new Map<string, number>()
+    for (const x of tickets) for (const tag of x.tags) if (tag !== 'en' && tag !== 'de') tagCount.set(tag, (tagCount.get(tag) ?? 0) + 1)
+    const topTags = [...tagCount].map(([tag, c]) => ({ tag, tickets: c })).sort((a, b) => b.tickets - a.tickets).slice(0, 15)
+
+    const lat = tickets.map(x => x.triage.latency_ms?.total).filter((v): v is number => typeof v === 'number')
+    return {
+      n, high: n ? high / n : null, hiInc: n ? hiInc / n : null, de: n ? de / n : null,
+      volTeam, cells, maxCell, typeLang, topTags,
+      p50: quantile(lat, 0.5), p95: quantile(lat, 0.95),
+    }
+  }, [tickets])
+
+  if (!m && !tickets.length) return (
     <div className="space-y-5">
-      <Skeleton className="h-8 w-48" />
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map(i => <Card key={i} className="space-y-3 p-5"><Skeleton className="h-4 w-32" /><Skeleton className="h-8 w-24" /></Card>)}</div>
-      <div className="grid gap-4 lg:grid-cols-2">{[0, 1].map(i => <Card key={i} className="p-5"><Skeleton className="h-[260px]" /></Card>)}</div>
+      <Skeleton className="h-9 w-72" /><Skeleton className="h-5 w-[28rem]" />
+      <Skeleton className="h-[106px]" />
+      <div className="grid gap-4 lg:grid-cols-2">{[0, 1].map(i => <div key={i} className="rounded-xl border border-line bg-white p-5"><Skeleton className="h-[320px]" /></div>)}</div>
     </div>
   )
 
-  const prio = (['high', 'medium', 'low'] as const).map(k => ({ key: k, name: t(k), value: m.by_priority[k] ?? 0 }))
-  const queues = Object.entries(m.by_queue).map(([name, value]) => ({ name, value }))
-  const outcome = [
-    { name: t('autoResolved'), value: m.auto_resolved, fill: '#0F8F84' },
-    { name: t('escalated'), value: m.escalated, fill: '#F0584A' },
-    { name: t('total'), value: m.total, fill: NAVY },
-  ]
-  const pct = (v: number | null | undefined) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
-
+  const total = m?.total ?? d.n
   return (
-    <div className="space-y-5">
-      <h1 className="text-2xl font-bold text-navy">{t('dashboard')}</h1>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi icon={<Activity size={18} />} label={t('total')} value={String(m.total)} />
-        <Kpi icon={<ShieldAlert size={18} />} label={t('escRate')} value={pct(m.escalation_rate)} sub={`${m.escalated} / ${m.total}`} />
-        <Kpi icon={<Gauge size={18} />} label={t('avgLatency')} value={`${m.avg_latency_ms.toFixed(0)} ms`} sub={m.mode === 'mock' ? 'mock timings' : 'live pipeline'} />
-        <Kpi icon={<Target size={18} />} label={t('recall')} value={pct(m.kpi.high_priority_incident_recall)}
-          sub={m.kpi.high_priority_incident_recall == null ? undefined
-            : `${t('holdout')}${m.kpi.high_incident_escalated != null ? ` · ${t('gateEsc')} ${pct(m.kpi.high_incident_escalated)} ${t('ofHighInc')}` : ''}`} />
-      </div>
+    <div className="space-y-6">
+      <PageHeader title={t('dashTitle')} sub={t('dashSub')} />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title={t('byPriority')}>
-          <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
-            <div className="relative h-[240px] w-[240px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={prio} dataKey="value" nameKey="name" innerRadius={70} outerRadius={110} paddingAngle={1.5}
-                    stroke="#fff" strokeWidth={2} startAngle={90} endAngle={-270}>
-                    {prio.map(p => <Cell key={p.key} fill={PRIO_COLOR[p.key]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v, n) => [`${v} (${m.total ? Math.round(Number(v) / m.total * 100) : 0}%)`, n]} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold tabular-nums text-navy">{m.total}</span>
-                <span className="text-xs text-slate-500">{t('tickets')}</span>
-              </div>
-            </div>
-            {/* legend doubles as the data table: label + count + share, so identity never relies on colour */}
-            <ul className="min-w-[160px] space-y-2.5">
-              {prio.map(p => (
-                <li key={p.key} className="flex items-center gap-2.5 text-sm">
-                  <span className="h-3 w-3 rounded-sm" style={{ background: PRIO_COLOR[p.key] }} />
-                  <span className="flex-1 text-slate-700">{p.name}</span>
-                  <span className="font-semibold tabular-nums text-slate-900">{p.value}</span>
-                  <span className="w-10 text-right text-xs tabular-nums text-slate-500">{m.total ? Math.round(p.value / m.total * 100) : 0}%</span>
-                </li>
+      <StatStrip items={[
+        { n: total, label: t('dTickets') },
+        { n: d.high == null ? null : Math.round(d.high * 100), suffix: '%', label: t('dHigh') },
+        { n: d.hiInc == null ? null : Math.round(d.hiInc * 100), suffix: '%', label: t('dHighInc') },
+        { n: d.de == null ? null : Math.round(d.de * 100), suffix: '%', label: t('dGerman') },
+      ]} />
+
+      <h2 className="text-[1.6rem] font-semibold tracking-[-0.01em] text-ink">{t('workGoes')}</h2>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Panel>
+          <ChartTitle>{t('volTeam')}</ChartTitle>
+          <ResponsiveContainer width="100%" height={340}>
+            <BarChart data={d.volTeam} layout="vertical" margin={{ top: 0, right: 8, left: 0, bottom: 4 }} barCategoryGap={4}>
+              <CartesianGrid horizontal={false} stroke={GRID} />
+              <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false}
+                label={{ value: t('ticketsAxis'), position: 'insideBottom', offset: -2, fill: '#5A6A7E', fontSize: 11 }} />
+              <YAxis type="category" dataKey="queue" width={150} interval={0} tick={AXIS} axisLine={false} tickLine={false}
+                tickFormatter={(v: string) => (v.length > 20 ? v.slice(0, 19) + '…' : v)} />
+              <Tooltip cursor={{ fill: '#F3F5F8' }} content={<TipBox total />} />
+              <Legend layout="vertical" align="right" verticalAlign="top" iconType="square" iconSize={10}
+                wrapperStyle={{ fontSize: 12, paddingLeft: 12 }} itemSorter={i => PRI.indexOf(String(i.value) as typeof PRI[number])}
+                formatter={(v: string) => <span className="text-ink">{v}</span>} />
+              {PRI.map((p, i) => (
+                <Bar key={p} dataKey={p} name={p} stackId="q" fill={PRI_COLOR[p]} stroke="#fff" strokeWidth={1}
+                  radius={i === PRI.length - 1 ? [0, 4, 4, 0] : 0} />
               ))}
-            </ul>
-          </div>
-        </ChartCard>
-
-        <ChartCard title={t('outcome')}>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={outcome} margin={{ top: 20, right: 10, left: -10, bottom: 0 }} barCategoryGap="30%">
-              <CartesianGrid vertical={false} stroke="#eef2f7" />
-              <XAxis dataKey="name" tick={AXIS} axisLine={false} tickLine={false} />
-              <YAxis tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip cursor={{ fill: '#f1f5f9' }} />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={56}>
-                {outcome.map(o => <Cell key={o.name} fill={o.fill} />)}
-                <LabelList dataKey="value" position="top" className="fill-slate-700 text-xs" />
-              </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
+        </Panel>
+
+        <Panel>
+          <ChartTitle>{t('typePrio')}</ChartTitle>
+          <div className="grid h-[340px] grid-cols-[80px_repeat(3,minmax(0,1fr))] grid-rows-[repeat(4,minmax(0,1fr))_28px] gap-0.5">
+            {TYPES.map(ty => (
+              <div key={ty} className="contents">
+                <div className="flex items-center justify-end pr-3 text-[11px] text-muted">{ty}</div>
+                {PRI.map(p => {
+                  const c = d.cells.find(x => x.ty === ty && x.p === p)!
+                  const share = d.n ? c.n / d.n : 0
+                  const k = c.n / d.maxCell
+                  return (
+                    <div key={p} title={`${ty} · ${p}: ${c.n} tickets (${(share * 100).toFixed(1)}%)`}
+                      className="flex items-center justify-center text-[13px] tabular-nums transition hover:ring-2 hover:ring-navy/40"
+                      style={{ background: reds(k), color: k > 0.55 ? '#fff' : '#1C2735' }}>
+                      {Math.round(share * 100)}%
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+            <div />
+            {PRI.map(p => <div key={p} className="flex items-center justify-center text-[11px] text-muted">{p}</div>)}
+          </div>
+          <div className="mt-1 text-center text-[11px] text-muted">{t('priorityL')}</div>
+        </Panel>
+
+        <Panel>
+          <ChartTitle>{t('typeLang')}</ChartTitle>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={d.typeLang} stackOffset="expand" margin={{ top: 4, right: 8, left: 0, bottom: 4 }} barCategoryGap="22%">
+              <CartesianGrid vertical={false} stroke={GRID} />
+              <XAxis dataKey="language" tick={AXIS} axisLine={false} tickLine={false} />
+              <YAxis tick={AXIS} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${Math.round(v * 100)}%`} width={44}
+                label={{ value: t('share'), angle: -90, position: 'insideLeft', fill: '#5A6A7E', fontSize: 11 }} />
+              <Tooltip cursor={{ fill: '#F3F5F8' }} content={<TipBox total />} />
+              <Legend layout="vertical" align="right" verticalAlign="top" iconType="square" iconSize={10}
+                wrapperStyle={{ fontSize: 12, paddingLeft: 12 }} itemSorter={i => TYPES.indexOf(String(i.value) as typeof TYPES[number])}
+                formatter={(v: string) => <span className="text-ink">{v}</span>} />
+              {TYPES.map(ty => <Bar key={ty} dataKey={ty} stackId="l" fill={TYPE_COLOR[ty]} stroke="#fff" strokeWidth={1} />)}
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+
+        <Panel>
+          <ChartTitle>{t('topTags')}</ChartTitle>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={d.topTags} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 4 }} barCategoryGap={3}>
+              <CartesianGrid horizontal={false} stroke={GRID} />
+              <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} />
+              <YAxis type="category" dataKey="tag" width={130} interval={0} tick={AXIS} axisLine={false} tickLine={false} />
+              <Tooltip cursor={{ fill: '#F3F5F8' }} content={<TipBox />} />
+              <Bar dataKey="tickets" name={t('ticketsAxis')} fill="#C8102E" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
       </div>
 
-      <ChartCard title={t('byQueue')}>
-        <ResponsiveContainer width="100%" height={Math.max(220, queues.length * 36)}>
-          <BarChart data={queues} layout="vertical" margin={{ top: 0, right: 40, left: 10, bottom: 0 }}>
-            <CartesianGrid horizontal={false} stroke="#eef2f7" />
-            <XAxis type="number" tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} />
-            <YAxis type="category" dataKey="name" width={210} tick={AXIS} axisLine={false} tickLine={false} />
-            <Tooltip cursor={{ fill: '#f1f5f9' }} />
-            <Bar dataKey="value" fill={NAVY} radius={[0, 4, 4, 0]} barSize={18}>
-              <LabelList dataKey="value" position="right" className="fill-slate-700 text-xs" />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      <h2 className="text-[1.6rem] font-semibold tracking-[-0.01em] text-ink">{t('modelPerf')}</h2>
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+        <MetricCard label="Type Macro-F1" value="—" hint={t('notExposed')} />
+        <MetricCard label="Queue Macro-F1" value="—" hint={t('notExposed')} />
+        <MetricCard label="Priority Macro-F1" value="—" hint={t('notExposed')} />
+        <MetricCard label={t('hpRecall')} value={pct(m?.kpi.high_priority_incident_recall)}
+          hint="Of the truly urgent incidents, how many we flagged (holdout, predicted high + Incident). From GET /metrics." />
+        <MetricCard label={t('latP95')} value={ms(d.p95)} hint="Computed from the tickets' latency_ms.total" />
+      </div>
+      <div className="flex items-start gap-2 rounded-lg bg-[#E8F0FE] px-4 py-3 text-sm text-[#1D4ED8]">
+        <Info size={16} className="mt-0.5 shrink-0" />{t('noConfusion')}
+      </div>
+
+      <h2 className="text-[1.6rem] font-semibold tracking-[-0.01em] text-ink">{t('liveOps')}</h2>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MetricCard label={t('escOnCall')} value={pct(m?.escalation_rate ?? null, 0)} />
+        <MetricCard label={t('medLat')} value={ms(d.p50)} />
+        <MetricCard label={t('p95Lat')} value={ms(d.p95)} />
+        <MetricCard label={t('autoResolved')} value={m ? `${m.auto_resolved} / ${m.total}` : '—'} />
+      </div>
     </div>
   )
-}
-
-function Kpi({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2 text-sm font-medium text-slate-500"><span className="text-coral">{icon}</span>{label}</div>
-      <div className="mt-2 text-3xl font-bold tabular-nums text-navy">{value}</div>
-      {sub && <div className="mt-1 text-xs text-slate-500">{sub}</div>}
-    </Card>
-  )
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <Card className="p-5"><div className="mb-3 font-semibold text-navy">{title}</div>{children}</Card>
 }

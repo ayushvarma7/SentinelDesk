@@ -80,7 +80,7 @@ function Shell() {
   }
 
   const nav: [Screen, string, typeof LayoutList][] = [
-    ['tickets', `${t('organisation')} › ${t('tickets')}`, LayoutList],
+    ['tickets', t('organisation'), LayoutList],
     ['dashboard', t('dashboard'), BarChart3],
   ]
 
@@ -112,7 +112,7 @@ function Shell() {
               className={`rounded px-2 py-0.5 text-[10px] font-bold tracking-wider ${mode === 'mock' ? 'bg-amber-400 text-navy' : 'bg-emerald-500 text-white'}`}>
               {mode === 'mock' ? t('mock') : t('live')}</span>}
             <LangToggle />
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-3 text-[11px] font-semibold ring-2 ring-white/10">YOU</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-3 text-[11px] font-semibold ring-2 ring-white/10">IT</span>
           </div>
         </div>
       </header>
@@ -125,7 +125,7 @@ function Shell() {
         )}
         {screen === 'tickets' && <Tickets tickets={tickets} reload={reload} onUpdate={onUpdate} loading={loading}
           openId={openId} setOpenId={setOpenId} replay={replay} />}
-        {screen === 'dashboard' && <Dashboard m={metrics} />}
+        {screen === 'dashboard' && <Dashboard m={metrics} tickets={tickets} />}
       </main>
     </div>
   )

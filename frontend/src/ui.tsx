@@ -10,12 +10,15 @@ export const PRIO_STYLE: Record<Priority, { row: string; bar: string; badge: str
   low: { row: 'bg-emerald-50/60 hover:bg-emerald-100/60', bar: 'border-l-emerald-500', badge: 'bg-emerald-100 text-emerald-800 ring-emerald-200', dot: 'bg-emerald-500' },
 }
 
-export function PriorityBadge({ p }: { p: Priority }) {
+export const P_CODE: Record<Priority, string> = { high: 'P1', medium: 'P2', low: 'P3' }
+
+/** Priority pill. `code` shows her ServiceNow-style P1/P2/P3 first. */
+export function PriorityBadge({ p, code = false }: { p: Priority; code?: boolean }) {
   const t = useT()
   const s = PRIO_STYLE[p] ?? PRIO_STYLE.medium
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${s.badge}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />{t(p)}
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${s.badge}`} title={t(p)}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />{code ? <><b>{P_CODE[p]}</b><span className="font-medium opacity-80">{t(p)}</span></> : t(p)}
     </span>
   )
 }

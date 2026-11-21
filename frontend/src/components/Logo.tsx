@@ -1,22 +1,19 @@
-/** SentinelDesk mark: a shield with a check-pulse. Same artwork as public/favicon.svg. */
-export function LogoMark({ size = 30 }: { size?: number }) {
+/** SentinelDesk mark: red shield with a pulse line (Poornima's assets/mark.svg). Same artwork as public/favicon.svg. */
+export function LogoMark({ size = 32 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="8" fill="#F0584A" />
-      <path d="M16 6.5 24 9.4v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.4L16 6.5Z" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M11.2 16.2h2.6l1.5-2.8 2.4 5 1.4-2.2h1.7" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={size} height={size} viewBox="0 0 44 44" aria-hidden="true">
+      <path d="M22 4 L37 9.5 V21 C37 30.5 30.5 37 22 40.5 C13.5 37 7 30.5 7 21 V9.5 Z" fill="#C8102E" />
+      <polyline points="12.5,22 17.5,22 20,15.5 23.5,28.5 26,22 31.5,22" fill="none" stroke="#FFFFFF" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
 
+/** Wordmark for the dark header (her assets/logo.svg: mark + white "SentinelDesk"). */
 export function Logo() {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex items-center gap-2">
       <LogoMark />
-      <div className="leading-none">
-        <div className="text-[15px] font-bold tracking-tight text-white">Sentinel<span className="text-coral">Desk</span></div>
-        <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">Service Management</div>
-      </div>
+      <span className="text-[19px] font-semibold tracking-[0.01em] text-white">SentinelDesk</span>
     </div>
   )
 }
