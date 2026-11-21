@@ -313,6 +313,7 @@ def normalize_result(r: dict) -> dict:
         "risks": list(r.get("risks", [])),
         "burst": r.get("burst") or {},
         "root_cause": r.get("root_cause"),
+        "problem": r.get("problem"),             # problem database entry (Track A, store.py)
         "engine": r.get("engine"),
         "unverified": list(r.get("unverified", [])),
         "language": r.get("language", "?"),
@@ -328,17 +329,36 @@ def normalize_result(r: dict) -> dict:
     }
 
 
-def run_triage(subject: str | None, body: str) -> dict:
-    """Validate input, call the pipeline, and return a normalized result (raises on bad input)."""
+def run_triage(subject: str | None, body: str, live: bool = True) -> dict:
+    """Validate input, call the pipeline, and return a normalized result (raises on bad input).
+
+    live=False: replay without recording (no burst, no root-cause grouping, no problem database)."""
     body = (body or "").strip()
     if not any(ch.isalnum() for ch in body):
         raise ValueError("empty")
     body = body[:MAX_CHARS]
     fn, _ = get_backend()
     t0 = datetime.now()
-    res = normalize_result(fn((subject or "").strip() or None, body))
+    try:
+        raw = fn((subject or "").strip() or None, body, live=live)
+    except TypeError:                      # mock / older backends take no live flag
+        raw = fn((subject or "").strip() or None, body)
+    res = normalize_result(raw)
     res["wall_ms"] = round((datetime.now() - t0).total_seconds() * 1000, 1)
     return res
+
+
+def close_problem(rec: dict, reply: str, agent: str, live_id: str | None = None) -> int | None:
+    """Ticket resolved in the console: mark its problem resolved in the problem database (store.py).
+
+    Unlike the precedent store, this also records an approved AI draft: the problem IS resolved, and
+    the record says who approved what. Returns the problem_id, or None (mock backend / no problem)."""
+    pid = ((rec.get("triage") or {}).get("problem") or {}).get("problem_id")
+    if pid is None or not (reply or "").strip() or "mock" in get_backend()[1]:
+        return None
+    from sentineldesk import store
+    store.resolve_problem(pid, reply, agent, precedent_id=live_id)
+    return pid
 
 
 def learn_from_resolution(rec: dict, reply: str, ai_draft: str | None, agent: str) -> str | None:

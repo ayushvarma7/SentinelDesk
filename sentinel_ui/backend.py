@@ -28,8 +28,11 @@ def warm_up() -> None:
     pipeline.triage("warm-up", "warm-up ticket to load the models", track_burst=False)
 
 
-def triage_ticket(subject: str | None, body: str) -> dict:
-    r = pipeline.triage(subject, body)
+def triage_ticket(subject: str | None, body: str, live: bool = True) -> dict:
+    """live=True for a real incoming ticket (counted by the burst detector, root-cause grouping and
+    the problem database). live=False replays a ticket (e.g. an agent asking the AI about a
+    historical KB ticket) without recording it anywhere."""
+    r = pipeline.triage(subject, body, track_burst=live)
     lat = r.latency_ms
     rc = r.root_cause
     return {
@@ -57,7 +60,8 @@ def triage_ticket(subject: str | None, body: str) -> dict:
             "occurrences": r.problem.occurrences, "status": r.problem.status,
             "resolution": r.problem.resolution, "similarity": r.problem.similarity,
             "related": [{"problem_id": x.problem_id, "title": x.title, "similarity": x.similarity,
-                         "occurrences": x.occurrences, "status": x.status} for x in r.problem.related]},
+                         "occurrences": x.occurrences, "status": x.status} for x in r.problem.related],
+            "log_id": r.problem.log_id},
         "latency_ms": {"triage": round(lat.get("embed", 0) + lat.get("classify", 0), 1),
                        "retrieval": round(lat.get("retrieve", 0), 1),
                        "generation": round(lat.get("generate", 0), 1),

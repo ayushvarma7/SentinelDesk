@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sentinel_ui.common import (ON_CALL, backend_sidebar, inject_css, learn_from_resolution, load_kb, load_live,
+from sentinel_ui.common import (ON_CALL, backend_sidebar, close_problem, inject_css, learn_from_resolution, load_kb, load_live, render_problem,
                                 render_retrieved, run_triage, status_badge, ticket_priority_label, ticket_type,
                                 update_ticket)
 
@@ -242,8 +242,8 @@ with right:
     if res is None:
         if st.button(t["ask"]):
             try:
-                st.session_state[f"bot_{number}"] = run_triage(
-                    None if summary == "(no subject)" else summary, body)
+                st.session_state[f"bot_{number}"] = run_triage(   # history replay: not recorded
+                    None if summary == "(no subject)" else summary, body, live=False)
                 st.rerun()
             except Exception as e:  # noqa: BLE001
                 st.error(f"Pipeline failed: {type(e).__name__}: {e}")
@@ -259,6 +259,7 @@ with right:
         if rec and rec.get("user_priority"):
             st.caption(f"Customer impact x urgency: {P_MAP.get(rec['user_priority'])} · "
                        f"model: {P_MAP.get(res['priority']['label'])} · ticket: {live_priority(rec)}")
+        render_problem(res.get("problem"))       # problem database: new or known, count, related
         rc = res.get("root_cause") or {}
         if rc.get("suggest_problem"):
             st.info(f"Probable shared root cause across {len(rc['group'])} live issues: raise a Problem record"
@@ -278,6 +279,12 @@ with right:
                         acts = log(f"Could not add the resolution to the knowledge base: {e}", acts)
                     if live_id:
                         acts = log(f"Edited resolution added to the knowledge base as {live_id}", acts)
+                    try:
+                        pid = close_problem(rec, draft, agent="IT service desk", live_id=live_id)
+                        if pid is not None:
+                            acts = log(f"Problem #{pid} marked resolved in the problem database", acts)
+                    except Exception as e:  # noqa: BLE001
+                        acts = log(f"Could not update the problem database: {e}", acts)
                     update_ticket(number, state="Resolved", reply=draft, resolved_at=now(), activity=acts)
                     st.rerun()
         else:

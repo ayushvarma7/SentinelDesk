@@ -102,6 +102,18 @@ def submit(kind: str, subject: str, body: str, extra: dict):
         return
     rec = add_ticket(kind, user["email"], subject, body, extra, res)
     st.success(t["submitted"].format(num=rec["number"]))
+    # Problem database (Track A): reassure the customer when others already reported the same issue.
+    prob = res.get("problem") or {}
+    de = st.session_state.get("lang") == "de"
+    if prob and not prob.get("is_new") and prob.get("occurrences", 0) >= 2:
+        if prob.get("status") == "resolved" and prob.get("resolution"):
+            st.info(("Dieses Problem ist bekannt und wurde bereits gelöst. Bisherige Lösung: "
+                     if de else "This is a known issue that has been resolved before. Earlier resolution: ")
+                    + prob["resolution"][:300])
+        else:
+            st.info((f"Dieses Problem wurde bereits {prob['occurrences']} Mal gemeldet. Unser Team arbeitet daran."
+                     if de else f"This issue has already been reported {prob['occurrences']} times. "
+                                "Our team is working on it."))
     if rec["status"] == ON_CALL:
         badge("esc", t["escalated"])
     else:

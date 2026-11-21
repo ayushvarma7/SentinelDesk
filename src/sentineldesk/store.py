@@ -225,6 +225,55 @@ def stats() -> dict:
                 "recurring_problems": one("SELECT COUNT(*) FROM problems WHERE occurrences > 1")}
 
 
+def get_problem(problem_id: int) -> dict | None:
+    with _LOCK, _conn() as con:
+        r = con.execute("SELECT problem_id, title, text, language, type, queue, priority, first_seen, last_seen, "
+                        "occurrences, status, resolution, resolved_by, resolved_at, precedent_id "
+                        "FROM problems WHERE problem_id=?", (int(problem_id),)).fetchone()
+        return dict(r) if r else None
+
+
+def problem_tickets(problem_id: int) -> list[dict]:
+    """Every logged ticket attached to a problem, oldest first."""
+    with _LOCK, _conn() as con:
+        rows = con.execute("SELECT l.log_id, l.ts, pt.similarity, l.subject, l.body, l.language, l.status, "
+                           "l.priority, l.engine FROM problem_tickets pt JOIN triage_log l ON l.log_id = pt.log_id "
+                           "WHERE pt.problem_id=? ORDER BY l.log_id", (int(problem_id),)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def search(qvec: np.ndarray, k: int = 5, min_sim: float | None = None) -> list[dict]:
+    """Read-only: the stored problems most similar to a query vector. Records nothing."""
+    min_sim = config.PROBLEM_RELATED_MIN_SIM if min_sim is None else min_sim
+    with _LOCK, _conn() as con:
+        _load_vectors(con)
+        ids, sims = _similar(qvec)
+        out = []
+        for pid, s in zip(ids[:k], sims[:k]):
+            if s < min_sim:
+                break
+            r = con.execute("SELECT problem_id, title, occurrences, status, resolution FROM problems "
+                            "WHERE problem_id=?", (int(pid),)).fetchone()
+            out.append({**dict(r), "similarity": round(float(s), 4),
+                        "same_problem": bool(s >= config.PROBLEM_MATCH_SIM)})
+        return out
+
+
+def resolve_problem(problem_id: int, resolution: str, resolved_by: str, precedent_id: str | None = None) -> None:
+    """Mark one problem resolved (console: agent closed a ticket, or resolved the problem directly)."""
+    if not (resolution or "").strip() or not (resolved_by or "").strip():
+        raise ValueError("a resolution and the person who resolved it are both required")
+    with _LOCK, _conn() as con:
+        con.execute("UPDATE problems SET status='resolved', resolution=?, resolved_by=?, resolved_at=?, "
+                    "precedent_id=COALESCE(?, precedent_id) WHERE problem_id=?",
+                    (resolution.strip(), resolved_by.strip(), _now(), precedent_id, int(problem_id)))
+
+
+def reopen_problem(problem_id: int) -> None:
+    with _LOCK, _conn() as con:
+        con.execute("UPDATE problems SET status='open' WHERE problem_id=?", (int(problem_id),))
+
+
 def reset() -> None:
     """Delete everything (demo reset / tests). The KB and the precedent store are untouched."""
     with _LOCK, _conn() as con:
