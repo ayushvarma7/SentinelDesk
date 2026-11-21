@@ -3,8 +3,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
-from sentinel_ui.common import (DEMO_USERS, SERVICES, T, add_ticket, badge, img_uri, inject_css,
-                                load_live, run_triage)
+from sentinel_ui.common import (DEMO_USERS, ON_CALL, REVIEW, SERVICES, T, add_ticket, badge, img_uri,
+                                inject_css, load_live, run_triage, ticket_priority_label, ticket_type)
 
 inject_css()
 st.session_state.setdefault("lang", "en")
@@ -69,13 +69,12 @@ if top[2].button(t["signout"], use_container_width=True):
 initials = "".join(w[0] for w in user["name"].split()[:2]).upper()
 top[3].markdown(f'<div class="avatar">{initials}</div>', unsafe_allow_html=True)
 
-# service status from live tickets: 3+ urgent incidents in the last hour
+# service status from live tickets: the burst detector fired in the last hour, or 3+ urgent incidents
 live = load_live()
 cutoff = datetime.now() - timedelta(hours=1)
-recent_urgent = [x for x in live if x["triage"]["priority"]["label"] == "high"
-                 and x["triage"]["type"]["label"] == "Incident"
-                 and datetime.strptime(x["opened"], "%Y-%m-%d %H:%M") >= cutoff]
-outage = len(recent_urgent) >= 3
+recent = [x for x in live if datetime.strptime(x["opened"], "%Y-%m-%d %H:%M") >= cutoff]
+recent_urgent = [x for x in recent if ticket_priority_label(x) == "high" and ticket_type(x) == "Incident"]
+outage = len(recent_urgent) >= 3 or any((x["triage"].get("burst") or {}).get("active") for x in recent)
 status_html = (f'<div style="margin-top:1.2rem;display:inline-flex;align-items:center;gap:.55rem;'
                f'background:rgba(255,255,255,.1);padding:.45rem .85rem;border-radius:999px;font-size:.92rem">'
                f'<span style="width:9px;height:9px;border-radius:50%;background:{"#F87171" if outage else "#34D399"}">'
@@ -103,12 +102,14 @@ def submit(kind: str, subject: str, body: str, extra: dict):
         return
     rec = add_ticket(kind, user["email"], subject, body, extra, res)
     st.success(t["submitted"].format(num=rec["number"]))
-    if res["escalation"]["escalate"]:
+    if rec["status"] == ON_CALL:
         badge("esc", t["escalated"])
     else:
         badge("ok", t["queued"].format(queue=res["queue"]["label"]))
+    # Self-help suggestions only when the gate found good precedents and nothing risky.
     sims = [r for r in res.get("retrieved", []) if r.get("answer_snippet")][:3]
-    if sims and not res["escalation"]["escalate"]:
+    if sims and rec["status"] not in (ON_CALL,) and not res.get("risks") \
+            and not (rec["status"] == REVIEW and not res.get("draft")):
         st.markdown(t["similar"])
         for r in sims:
             with st.expander(r.get("subject") or r.get("ticket_id", "")):
@@ -128,7 +129,9 @@ with tab_inc:
         body = st.text_area(t["details"], height=150, key="inc_body")
         go = st.form_submit_button(t["submit_inc"], type="primary")
     if go:
-        submit("incident", subj, body, {"service": service, "impact": impact, "user_urgency": urgency})
+        submit("incident", subj, body, {"service": service, "impact": impact, "user_urgency": urgency,
+                                        "impact_idx": t["impact_opts"].index(impact),
+                                        "urgency_idx": t["urgency_opts"].index(urgency)})
 
 with tab_req:
     with st.form("request"):

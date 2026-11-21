@@ -54,6 +54,26 @@ PYTHONPATH=src python -m pytest -q tests/           # contract + gate + adversar
 PYTHONPATH=src python scripts/attack_table.py      # -> reports/attack_table.md
 ```
 
+### Console (Streamlit)
+
+```bash
+PYTHONPATH=src python scripts/build_kb_index.py     # once: the retrieval index the console needs
+streamlit run app.py                                # http://localhost:8501
+```
+
+- **Customer portal** (`/customer`): users file **Incidents** or **Requests** only. Problems and Changes are raised
+  by the organisation from incidents.
+  - Every submission runs through the real pipeline (`sentinel_ui/backend.py`) and is stored in
+    `data/live_tickets.json` as `INC…` / `REQ…`.
+  - The form's choice is the ticket type of record; the model's type is shown as the AI's opinion.
+  - Priority: incidents take the more urgent of the model and the form's impact × urgency matrix, and a ticket the
+    gate sends to on-call is always P1.
+  - Assignment: on-call engineer for `ESCALATE_ONCALL`, otherwise the predicted queue's group.
+- **Organisation** (`/agent`): ticket list, ticket form with SLA timer, the gate's three-tier status, and the AI draft.
+- **Dashboard** (`/dashboard`): volume charts and the holdout metrics from `reports/triage_metrics.json`.
+- Sign in with a demo account from `sentinel_ui/common.py` (`DEMO_USERS`). Tick "Use mock backend" in the sidebar to
+  run without models.
+
 ## Pipeline status
 
 | Stage | Status |

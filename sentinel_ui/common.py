@@ -20,7 +20,8 @@ import mock_desk  # noqa: E402
 
 DATA_PATH = Path(os.getenv("SENTINEL_DATA", ROOT / "data/processed/kb_train.parquet"))
 LIVE_PATH = Path(os.getenv("SENTINEL_LIVE", ROOT / "data/live_tickets.json"))
-METRICS_PATH = Path(os.getenv("SENTINEL_METRICS", ROOT / "artifacts/metrics.json"))
+# Written by scripts/evaluate.py (holdout, never used for tuning).
+METRICS_PATH = Path(os.getenv("SENTINEL_METRICS", ROOT / "reports/triage_metrics.json"))
 MAX_CHARS = 6000
 NU_RED = "#C8102E"
 
@@ -140,6 +141,7 @@ def inject_css():
         .badge .dot{width:9px;height:9px;border-radius:50%;margin-top:.42rem;flex:none}
         .ok{background:#E7F5F2;color:#0B4F4A}.ok .dot{background:var(--ok)}
         .esc{background:#FCEBEC;color:#7A1020}.esc .dot{background:var(--accent);animation:pulse 1.6s infinite}
+        .badge.warn{background:#FEF3E2;color:#7C3A06}.badge.warn .dot{background:var(--warn)}
         @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(200,16,46,.5)}70%{box-shadow:0 0 0 8px rgba(200,16,46,0)}100%{box-shadow:0 0 0 0 rgba(200,16,46,0)}}
         .pill{display:inline-block;padding:.12rem .6rem;border-radius:999px;font-size:.82rem;font-weight:600;
               background:#EEF1F5;color:#334155;margin:0 .25rem .25rem 0}
@@ -166,9 +168,13 @@ def header(title: str, subtitle: str = ""):
 
 
 def stat_strip(items: list[tuple[int, str, str]]):
-    """items: (number, suffix, label). Numbers count up on load."""
+    """items: (number, suffix, label).
+
+    The number is real text. It used to exist only as a CSS counter animation, which showed 0 under
+    prefers-reduced-motion, in background tabs and to screen readers.
+    """
     cells = "".join(
-        f'<div><div class="num"><span class="c" style="--to:{int(n)}"></span>{suf}</div>'
+        f'<div><div class="num"><span>{int(n):,}</span>{suf}</div>'
         f'<div class="lbl">{lbl}</div></div>' for n, suf, lbl in items)
     st.markdown(f'<div class="stats">{cells}</div>', unsafe_allow_html=True)
 
@@ -264,9 +270,12 @@ DEMO_USERS = {
 # ------------------------------------------------------------------ backend
 @st.cache_resource(show_spinner="Loading models…")
 def _load_real_backend():
-    target = os.getenv("SENTINEL_BACKEND", "sentineldesk.pipeline:triage_ticket")
+    target = os.getenv("SENTINEL_BACKEND", "sentinel_ui.backend:triage_ticket")
     mod_name, fn_name = target.split(":")
-    return getattr(importlib.import_module(mod_name), fn_name), target
+    mod = importlib.import_module(mod_name)
+    if hasattr(mod, "warm_up"):
+        mod.warm_up()          # load encoder, classifier and index once, before the first ticket
+    return getattr(mod, fn_name), target
 
 
 def get_backend():
@@ -285,12 +294,27 @@ def _pred(x):
     return {"label": str(x), "confidence": 0.0}
 
 
+ON_CALL, REVIEW, AUTO = "ESCALATE_ONCALL", "HUMAN_REVIEW", "AUTO_DRAFT_READY"
+STATUS_TEXT = {ON_CALL: "Escalate to on-call engineer", REVIEW: "Needs human review",
+               AUTO: "Auto-draft ready for agent review"}
+
+
 def normalize_result(r: dict) -> dict:
-    """Map the real pipeline's output to the UI contract. Edit here if key names differ."""
+    """Map the backend's output to the UI contract. Edit here if key names differ."""
     esc = r.get("escalation", {})
     if isinstance(esc, bool):
         esc = {"escalate": esc, "reasons": []}
+    status = r.get("status")
+    if status not in STATUS_TEXT:   # mock / older backends only say escalate yes or no
+        oncall = any("incident" in x.lower() for x in esc.get("reasons", []))
+        status = (ON_CALL if oncall else REVIEW) if esc.get("escalate") else AUTO
     return {
+        "status": status,
+        "risks": list(r.get("risks", [])),
+        "burst": r.get("burst") or {},
+        "root_cause": r.get("root_cause"),
+        "engine": r.get("engine"),
+        "unverified": list(r.get("unverified", [])),
         "language": r.get("language", "?"),
         "type": _pred(r.get("type")),
         "queue": _pred(r.get("queue")),
@@ -334,6 +358,8 @@ def load_kb() -> tuple[pd.DataFrame, bool]:
     """Historical (80% split) tickets. Returns (df, is_real_data)."""
     if DATA_PATH.exists():
         df = pd.read_parquet(DATA_PATH)
+        # same KB as the pipeline (sentineldesk.data.load_kb): drop the rows with no answer
+        df = df[df["answer"].notna() & (df["answer"].astype(str).str.strip() != "")].reset_index(drop=True)
         real = True
     else:  # tiny stand-in so the UI still works before the data file exists
         rows = []
@@ -372,18 +398,49 @@ def save_live(tickets: list[dict]):
     LIVE_PATH.write_text(json.dumps(tickets, ensure_ascii=False, indent=1))
 
 
+# ------------------------------------------------------------------ ticket record rules
+# Users can only open Incidents and Requests (Problems and Changes are raised by the organisation
+# from incidents), so the form's choice is the ticket type of record. The model's type is kept as
+# triage["type"] and shown as the AI's opinion.
+KIND_TYPE = {"incident": "Incident", "request": "Request"}
+PRI_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def form_priority(impact_idx: int | None, urgency_idx: int | None) -> str | None:
+    """ITIL impact x urgency matrix (each 0=low .. 2=high) -> high / medium / low."""
+    if impact_idx is None or urgency_idx is None:
+        return None
+    score = impact_idx + urgency_idx
+    return "high" if score >= 3 else "medium" if score == 2 else "low"
+
+
+def ticket_priority(kind: str, model_priority: str, user_priority: str | None) -> str:
+    """Incidents take the more urgent of the model and the impact x urgency matrix (a missed outage
+    costs more than a false alarm). Requests keep the model's priority."""
+    if kind == "incident" and user_priority:
+        return min(model_priority, user_priority, key=lambda p: PRI_RANK.get(p, 2))
+    return model_priority
+
+
 def add_ticket(kind: str, user: str, subject: str, body: str, extra: dict, res: dict) -> dict:
     with _lock:
         tickets = load_live()
         prefix = "INC" if kind == "incident" else "REQ"
         n = sum(t["number"].startswith(prefix) for t in tickets) + 1
+        status = res.get("status", ON_CALL if res["escalation"]["escalate"] else AUTO)
+        user_p = form_priority(extra.get("impact_idx"), extra.get("urgency_idx"))
         rec = {
             "number": f"{prefix}{n:07d}",
-            "kind": kind, "user": user,
+            "kind": kind, "ticket_type": KIND_TYPE.get(kind, "Request"), "user": user,
             "opened": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "subject": subject, "body": body, **extra,
-            "state": "Escalated" if res["escalation"]["escalate"] else "Awaiting agent",
-            "assigned_to": "On-call engineer" if res["escalation"]["escalate"] else "",
+            "user_priority": user_p,
+            # The gate's on-call decision outranks both: a critical incident is P1.
+            "priority": "high" if status == ON_CALL else ticket_priority(kind, res["priority"]["label"], user_p),
+            "status": status,
+            "state": "Escalated" if status == ON_CALL else "Awaiting agent",
+            # Assignment: on-call for critical tickets, otherwise the predicted queue's group.
+            "assigned_to": "On-call engineer" if status == ON_CALL else "",
             "triage": res,
         }
         tickets.append(rec)
@@ -401,22 +458,45 @@ def update_ticket(number: str, **fields):
 
 
 def load_metrics() -> dict | None:
-    if METRICS_PATH.exists():
-        try:
-            return json.loads(METRICS_PATH.read_text())
-        except json.JSONDecodeError:
-            return None
-    return None
+    """Holdout metrics in the dashboard's shape, read from scripts/evaluate.py's report."""
+    if not METRICS_PATH.exists():
+        return None
+    try:
+        m = json.loads(METRICS_PATH.read_text())
+    except json.JSONDecodeError:
+        return None
+    if "n_holdout" not in m:          # already in the dashboard's own shape
+        return m
+    hi, pipe = m.get("high_priority_incident", {}), m.get("pipeline", {})
+    return {
+        "n_test": m["n_holdout"],
+        **{h: m[h] for h in ("type", "queue", "priority", "language") if h in m},
+        "high_priority_incident_recall": hi.get("recall_gate_hard_rule", hi.get("recall_predicted_high")),
+        "latency_ms": {"p50": pipe.get("latency_ms_p50_all"), "p95": pipe.get("latency_ms_p95_all")},
+        "confusion": m.get("confusion") or {},
+    }
+
+
+def ticket_type(x: dict) -> str:
+    """Type of record for a live ticket (the form's choice); older records fall back to the model."""
+    return x.get("ticket_type") or x["triage"]["type"]["label"]
+
+
+def ticket_priority_label(x: dict) -> str:
+    """Effective priority of a live ticket: agent override, else the stored ticket priority."""
+    return x.get("priority_override") or x.get("priority") or x["triage"]["priority"]["label"]
 
 
 # ------------------------------------------------------------------ rendering
+def status_badge(res: dict):
+    status = res.get("status", AUTO)
+    why = "; ".join(res["escalation"]["reasons"])
+    kind = {ON_CALL: "esc", REVIEW: "warn", AUTO: "ok"}.get(status, "esc")
+    badge(kind, STATUS_TEXT.get(status, status) + (f": {why}" if why else ""))
+
+
 def render_triage(res: dict, show_draft: bool = True, draft_key: str = "draft"):
-    esc = res["escalation"]
-    if esc["escalate"]:
-        why = "; ".join(esc["reasons"]) or "flagged by safety gate"
-        badge("esc", f"Escalate to on-call engineer: {why}")
-    else:
-        badge("ok", "Auto-draft ready for agent review")
+    status_badge(res)
 
     c = st.columns(5)
     for col, key, title in [(c[0], "type", "Type"), (c[1], "queue", "Queue"),

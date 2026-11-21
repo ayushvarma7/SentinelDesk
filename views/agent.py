@@ -4,8 +4,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sentinel_ui.common import (backend_sidebar, badge, inject_css, load_kb, load_live,
-                                render_retrieved, run_triage, update_ticket)
+from sentinel_ui.common import (ON_CALL, backend_sidebar, inject_css, load_kb, load_live, render_retrieved,
+                                run_triage, status_badge, ticket_priority_label, ticket_type, update_ticket)
 
 inject_css()
 backend_sidebar()
@@ -76,14 +76,14 @@ def live_group(x):
 
 
 def live_priority(x):
-    return P_MAP.get(x.get("priority_override") or x["triage"]["priority"]["label"], "P3")
+    return P_MAP.get(ticket_priority_label(x), "P3")
 
 
 live_rows = pd.DataFrame([{
     t["inc"]: x["number"], t["summary"]: x["subject"] or x["body"][:80],
     t["p"]: live_priority(x), t["date"]: x["opened"], t["status"]: x["state"],
     t["assigned"]: live_group(x),
-    t["tagtype"]: x["triage"]["type"]["label"] + (f" · {x['service']}" if x.get("service") else ""),
+    t["tagtype"]: ticket_type(x) + (f" · {x['service']}" if x.get("service") else ""),
 } for x in reversed(live)])
 
 hist_rows = pd.DataFrame({
@@ -247,14 +247,21 @@ with right:
             except Exception as e:  # noqa: BLE001
                 st.error(f"Pipeline failed: {type(e).__name__}: {e}")
     else:
-        esc = res["escalation"]
-        if esc["escalate"]:
-            badge("esc", "; ".join(esc["reasons"]) or "Escalate")
-        else:
-            badge("ok", "Auto-draft ready")
-        st.caption(f"{res['type']['label']} | {res['queue']['label']} | "
+        status_badge(res)
+        ai_type = res["type"]["label"]
+        if rec and ai_type != ticket_type(rec):
+            ai_type = f"{ticket_type(rec)} (AI reads it as {ai_type})"
+        st.caption(f"{ai_type} | {res['queue']['label']} | "
                    f"{P_MAP.get(res['priority']['label'], '?')} | "
-                   f"{res['priority']['confidence']:.0%} sure | {res['language'].upper()}")
+                   f"{res['priority']['confidence']:.0%} sure | {res['language'].upper()}"
+                   + (f" | {res['engine']}" if res.get("engine") else ""))
+        if rec and rec.get("user_priority"):
+            st.caption(f"Customer impact x urgency: {P_MAP.get(rec['user_priority'])} · "
+                       f"model: {P_MAP.get(res['priority']['label'])} · ticket: {live_priority(rec)}")
+        rc = res.get("root_cause") or {}
+        if rc.get("suggest_problem"):
+            st.info(f"Probable shared root cause across {len(rc['group'])} live issues: raise a Problem record"
+                    + (f" (closest known Problem: {rc['known_problem']})" if rc.get("known_problem") else ""))
         if res.get("draft"):
             draft = st.text_area("draft", res["draft"], height=180, key=f"draft_{number}",
                                  label_visibility="collapsed")
@@ -276,8 +283,9 @@ st.divider()
 st.markdown(f"#### {t['activity']}")
 acts = []
 if rec:
-    first = "Escalated to on-call" if rec["triage"]["escalation"]["escalate"] else "Sent to " + \
-        rec["triage"]["queue"]["label"]
+    first = "Escalated to on-call" if rec.get("status", "") == ON_CALL \
+        or (not rec.get("status") and rec["triage"]["escalation"]["escalate"]) \
+        else "Sent to " + rec["triage"]["queue"]["label"]
     acts = [{"at": rec["opened"], "text": f"Opened by {rec['user']} via portal. {first}."}] + \
         list(rec.get("activity", []))
 if acts:

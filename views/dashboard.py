@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from sentinel_ui.common import METRICS_PATH, header, inject_css, load_kb, load_live, load_metrics, stat_strip
+from sentinel_ui.common import (METRICS_PATH, ON_CALL, header, inject_css, load_kb, load_live, load_metrics,
+                                stat_strip, ticket_priority_label, ticket_type)
 
 inject_css()
 header("Operations dashboard", "Ticket volume, urgency and routing patterns, plus how well the models perform")
@@ -16,9 +17,10 @@ if not real:
 hist = kb[["type", "queue", "priority", "language"]].copy()
 hist["source"] = "History"
 live_df = pd.DataFrame([{
-    "type": x["triage"]["type"]["label"], "queue": x["triage"]["queue"]["label"],
-    "priority": x["triage"]["priority"]["label"], "language": x["triage"]["language"],
-    "source": "Portal", "escalated": x["triage"]["escalation"]["escalate"],
+    "type": ticket_type(x), "queue": x.get("group_override") or x["triage"]["queue"]["label"],
+    "priority": ticket_priority_label(x), "language": x["triage"]["language"],
+    "source": "Portal", "escalated": x.get("status", ON_CALL if x["triage"]["escalation"]["escalate"] else "")
+    == ON_CALL,
     "latency": x["triage"].get("wall_ms") or x["triage"].get("latency_ms", {}).get("total"),
 } for x in live])
 
