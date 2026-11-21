@@ -16,8 +16,8 @@ from .schema import Precedent, Prediction, TriageResult
 STAGES = {
     "embed": True,       # Track A wired embed.encode (Track B owns the file)
     "classify": True,    # Track A: falls back to the stub if artifacts/heads.joblib is missing
-    "retrieve": False,
-    "generate": False,
+    "retrieve": True,    # Track B: real index, stub fallback if artifacts are missing
+    "generate": True,    # Track C: Gemini when a key exists, extractive fallback otherwise
 }
 
 
@@ -72,7 +72,15 @@ def triage(subject: str | None, body: str | None,
     latency["classify"] = (time.perf_counter() - t) * 1000
 
     t = time.perf_counter()
-    precedents = _stub_precedents()      # TODO Track B
+    if STAGES["retrieve"] and qvec is not None:
+        from . import retrieve
+        if retrieve.is_ready():
+            precedents = retrieve.search(qvec, config.TOP_K, preds["queue"].label,
+                                         language=preds["language"].label)
+        else:
+            precedents = _stub_precedents()   # index not built yet
+    else:
+        precedents = _stub_precedents()
     latency["retrieve"] = (time.perf_counter() - t) * 1000
 
     # Root cause (Track A): only for issues (Incident/Problem), only with a real embedding.
@@ -88,11 +96,22 @@ def triage(subject: str | None, body: str | None,
     )
 
     t = time.perf_counter()
+    engine = None
     if escalate:
+        # An escalated ticket gets no draft at all. Showing the operator a
+        # suggested reply next to "escalate to on-call" invites them to send it.
         draft_reply, cited, unverified = None, [], []
+    elif STAGES["generate"]:
+        from . import generate
+        d = generate.draft(masked_text, preds["language"].label, precedents)
+        draft_reply = d["reply"]
+        cited, unverified, engine = d["cited_ticket_ids"], d["unverified_claims"], d["engine"]
+        if not d["grounded"]:
+            escalate = True
+            reasons.append("Draft not grounded in the retrieved precedents")
+            draft_reply, cited = None, []
     else:
-        draft_reply = "[stub draft — Track C]"   # TODO Track C
-        cited, unverified = [p.ticket_id for p in precedents], []
+        draft_reply, cited, unverified = "[stub draft]", [p.ticket_id for p in precedents], []
     latency["generate"] = (time.perf_counter() - t) * 1000
     latency["total"] = (time.perf_counter() - t0) * 1000
 
@@ -110,4 +129,5 @@ def triage(subject: str | None, body: str | None,
         masked_pii=masked_counts,
         latency_ms=latency,
         root_cause=root_cause,
+        engine=engine,
     )

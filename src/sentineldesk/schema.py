@@ -63,6 +63,10 @@ class TriageResult:
 
     root_cause: RootCause | None = None    # set for Incident/Problem tickets (Track A); optional, so old callers still work
 
+    # Which path produced the draft: the model name, "extractive-fallback", or
+    # None when the ticket was escalated and no draft was written.
+    engine: str | None = None
+
     @property
     def overall_confidence(self) -> float:
         """A ticket is only as trustworthy as its least certain head."""

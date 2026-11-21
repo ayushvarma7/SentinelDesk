@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from . import config
+from .generate import unsupported_figures  # noqa: F401  (P2 implements, gate re-exports)
 from .schema import Precedent, Prediction, RootCause
 
 _ACTION_RE = [re.compile(p, re.I) for p in config.UNSUPPORTED_ACTION_PATTERNS]
@@ -52,12 +53,12 @@ def evaluate(
         top1 = precedents[0].score
         if top1 < min_top1:
             reasons.append(
-                f"No sufficiently similar precedent (best match {top1:.2f} < {min_top1:.2f})"
+                f"No sufficiently similar precedent (best match {top1:.4f} < {min_top1:.4f})"
             )
         top3 = [p.score for p in precedents[:3]]
         mean3 = sum(top3) / len(top3)
         if mean3 < min_mean3:
-            reasons.append(f"Weak precedent support (mean top-3 {mean3:.2f} < {min_mean3:.2f})")
+            reasons.append(f"Weak precedent support (mean top-3 {mean3:.3f} < {min_mean3:.3f})")
 
     # 5. Commitments we cannot make unless a past resolution made them too.
     if any(r.search(text) for r in _ACTION_RE):
