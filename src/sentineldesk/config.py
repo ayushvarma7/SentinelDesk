@@ -37,6 +37,9 @@ VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).per
 # Incident<->Problem), so the critical-escalation rule treats both as "service is broken".
 # Validation: high-priority Incident recall 0.803 (Incident only) -> 0.882 (Incident or Problem).
 CRITICAL_TYPES = ("Incident", "Problem")
+# Escalate to on-call when P(high) x P(Incident or Problem) >= this (gate rule 1a). None disables.
+# Chosen by scripts/escalation_sweep.py on the KB validation slice (see reports/escalation_sweep.json).
+CRITICAL_SCORE_MIN = 0.20
 # Similarity (e5 query vectors) above which two issues are treated as the same root cause.
 # Calibrated on KB issue pairs from different queues with no shared tag: p90=0.891, p99=0.917.
 ROOT_CAUSE_GROUP_SIM = 0.89
@@ -85,9 +88,9 @@ MIN_MEAN_TOP3_SIMILARITY = 0.8450
 # max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 25.2% auto-drafted,
 # 97.0% of high Incidents escalated, auto-drafted queue accuracy 0.815 vs 0.609 overall.
 MIN_CONFIDENCE = {
-    "type": 0.75,
+    "type": 0.0,
     "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
-    "priority": 0.70,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
+    "priority": 0.0,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
 }
 
 # Requests that imply a commitment we cannot make without precedent.

@@ -129,10 +129,13 @@ def triage(subject: str | None, body: str | None,
 
     burst = (BURST.check(qvec, sim=(thresholds or {}).get("burst_sim")) if track_burst
              else {"active": False, "related": [], "live_id": None, "max_sim": 0.0})
-    escalate, reasons = gate.evaluate(
+    detailed = gate.evaluate_detailed(
         text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst,
         root_cause=root_cause
     )
+    reasons = [r for _, r in detailed]
+    escalate = bool(reasons)
+    status, draft_allowed = gate.decide(detailed)
 
     # Root-cause-aware RAG: if the ticket matches a known Problem that retrieval did not already
     # return, give it to the drafter too, so the reply can cite the root cause. Added after the
@@ -143,9 +146,11 @@ def triage(subject: str | None, body: str | None,
 
     t = time.perf_counter()
     engine = None
-    if escalate:
-        # An escalated ticket gets no draft at all. Showing the operator a
-        # suggested reply next to "escalate to on-call" invites them to send it.
+    if not draft_allowed:
+        # On-call tickets and blocked ones (attacks, legal, unsupported commitments) get no draft
+        # at all: a suggested reply next to "escalate to on-call" invites someone to send it.
+        # HUMAN_REVIEW tickets whose only reasons are soft (low confidence, weak precedent) still
+        # get a draft, clearly marked for a human to approve.
         draft_reply, cited, unverified = None, [], []
     elif STAGES["generate"]:
         from . import generate
@@ -153,7 +158,7 @@ def triage(subject: str | None, body: str | None,
         draft_reply = d["reply"]
         cited, unverified, engine = d["cited_ticket_ids"], d["unverified_claims"], d["engine"]
         if not d["grounded"]:
-            escalate = True
+            escalate, status = True, gate.REVIEW
             reasons.append("Draft not grounded in the retrieved precedents")
             draft_reply, cited = None, []
     else:
@@ -167,6 +172,7 @@ def triage(subject: str | None, body: str | None,
         queue=preds["queue"],
         priority=preds["priority"],
         escalate=escalate,
+        status=status,
         escalation_reasons=reasons,
         precedents=precedents,
         draft_reply=draft_reply,

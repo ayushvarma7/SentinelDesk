@@ -61,6 +61,11 @@ class TriageResult:
     masked_pii: dict[str, int]             # {"email": 2, "ip": 1}
     latency_ms: dict[str, float]           # embed / classify / retrieve / generate / total
 
+    # Three-tier outcome (gate.decide): "AUTO_DRAFT_READY" | "HUMAN_REVIEW" | "ESCALATE_ONCALL".
+    # HUMAN_REVIEW may carry a draft for a human to approve (soft reasons only). escalate stays
+    # True for both HUMAN_REVIEW and ESCALATE_ONCALL, so older callers keep their meaning.
+    status: str = ""
+
     # Added by P3 (defaults keep every existing constructor call valid).
     risks: list[str] = field(default_factory=list)       # gate.detect_risks(): "prompt_injection", ...
     burst: dict = field(default_factory=dict)            # {"active", "related", "live_id", "max_sim"}
