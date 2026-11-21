@@ -341,6 +341,22 @@ def run_triage(subject: str | None, body: str) -> dict:
     return res
 
 
+def learn_from_resolution(rec: dict, reply: str, ai_draft: str | None, agent: str) -> str | None:
+    """Turn a human resolution into a live precedent (pipeline.resolve_ticket, P2's learning loop).
+
+    Only when a person actually wrote or changed the reply: an unedited AI draft is not indexed, so
+    the system never learns from its own output. Skipped on the mock backend. Returns the LIVE id.
+    """
+    if (reply or "").strip() == (ai_draft or "").strip() or "mock" in get_backend()[1]:
+        return None
+    from sentineldesk.pipeline import resolve_ticket
+    res = rec["triage"]
+    out = resolve_ticket(rec.get("subject") or None, rec["body"], reply, resolved_by=agent,
+                         queue=rec.get("group_override") or res["queue"]["label"],
+                         type_=rec.get("ticket_type") or res["type"]["label"], language=res["language"])
+    return out["ticket_id"]
+
+
 def backend_sidebar():
     with st.sidebar:
         st.toggle("Use mock backend", key="force_mock")

@@ -4,8 +4,9 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sentinel_ui.common import (ON_CALL, backend_sidebar, inject_css, load_kb, load_live, render_retrieved,
-                                run_triage, status_badge, ticket_priority_label, ticket_type, update_ticket)
+from sentinel_ui.common import (ON_CALL, backend_sidebar, inject_css, learn_from_resolution, load_kb, load_live,
+                                render_retrieved, run_triage, status_badge, ticket_priority_label, ticket_type,
+                                update_ticket)
 
 inject_css()
 backend_sidebar()
@@ -269,9 +270,15 @@ with right:
                 st.caption("Based on: " + ", ".join(res["cited_ids"]))
             if rec and rec["state"] not in ("Resolved", "Closed"):
                 if st.button(t["use"], type="primary"):
-                    update_ticket(number, state="Resolved", reply=draft, resolved_at=now(),
-                                  activity=log("Reply sent from bot draft, ticket resolved",
-                                               rec.get("activity", [])))
+                    acts = log("Reply sent, ticket resolved", rec.get("activity", []))
+                    try:
+                        live_id = learn_from_resolution(rec, draft, res.get("draft"), agent="IT service desk")
+                    except Exception as e:  # noqa: BLE001  (never block resolving on the learning step)
+                        live_id = None
+                        acts = log(f"Could not add the resolution to the knowledge base: {e}", acts)
+                    if live_id:
+                        acts = log(f"Edited resolution added to the knowledge base as {live_id}", acts)
+                    update_ticket(number, state="Resolved", reply=draft, resolved_at=now(), activity=acts)
                     st.rerun()
         else:
             st.warning(t["no_draft"])
