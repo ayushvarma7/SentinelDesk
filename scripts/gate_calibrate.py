@@ -42,12 +42,14 @@ from sentineldesk.schema import Prediction
 REPORTS = config.ROOT / "reports"
 HANDTYPED = Path(__file__).resolve().parent.parent / "tests" / "handtyped_calibration.json"
 
-# Same grid as P3's, extended downward: the question is how far the floors must drop before
-# hand-typed tickets get through, and whether validation safety survives it.
+# Retargeted after the Track A / Track C merges. The type and priority floors are now 0.0 in
+# config — critical_score carries the safety job — so sweeping them is sweeping nothing. The
+# knobs that actually move the gate today are the queue floor, the critical-score threshold,
+# and the top-1 similarity floor.
 GRID = {
-    "type": [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.65, 0.75],
-    "queue": [0.15, 0.20, 0.25, 0.30, 0.40, 0.50],
-    "priority": [0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70],
+    "queue": [0.0, 0.15, 0.25, 0.35, 0.50],
+    "critical": [0.05, 0.10, 0.15, 0.20, 0.30],
+    "min_top1": [0.845, 0.855, 0.865, 0.875],
 }
 
 MIN_HIGH_INCIDENT_ESCALATED = 0.95
@@ -110,13 +112,16 @@ def main() -> None:
 
     rows = []
     t0 = time.time()
-    for ct, cq, cp in itertools.product(*GRID.values()):
-        th = {"min_confidence": {"type": ct, "queue": cq, "priority": cp}}
+    for cq, crit, s1 in itertools.product(*GRID.values()):
+        th = {"min_confidence": {"type": config.MIN_CONFIDENCE["type"], "queue": cq,
+                                 "priority": config.MIN_CONFIDENCE["priority"]},
+              "critical_score_min": crit,
+              "min_top1_similarity": s1}
         vesc = escalations(vt, vheads, vprecs, th)
         hesc = escalations(ht, hheads, hprecs, th)
         vauto = ~vesc
         rows.append({
-            "type": ct, "queue": cq, "priority": cp,
+            "queue": cq, "critical": crit, "min_top1": s1,
             "val_auto_share": round(float(vauto.mean()), 3),
             "val_high_incident_escalated": round(float(vesc[true_hi].mean()), 3),
             "val_auto_queue_accuracy": round(float(queue_ok[vauto].mean()), 3) if vauto.any() else 0.0,
@@ -153,11 +158,12 @@ def main() -> None:
                "n_meeting_rule": int(len(ok)),
                "n_validation": int(len(val)),
                "n_handtyped": len(hand),
-               "chosen": {k: (float(best[k]) if k in ("type", "queue", "priority") else best[k])
-                          for k in ("type", "queue", "priority", "val_auto_share",
+               "chosen": {k: float(best[k]) if k in ("queue", "critical", "min_top1") else best[k]
+                          for k in ("queue", "critical", "min_top1", "val_auto_share",
                                     "val_high_incident_escalated", "val_auto_queue_accuracy",
                                     "hand_auto_share", "hand_critical_escalated")}}
-        print(f"\n[cal] CHOSEN  type={best['type']} queue={best['queue']} priority={best['priority']}")
+        print(f"\n[cal] CHOSEN  queue={best['queue']} critical_score_min={best['critical']} "
+              f"min_top1={best['min_top1']}")
 
     (REPORTS / "gate_calibrate.json").write_text(json.dumps(out, indent=2, default=float))
 
