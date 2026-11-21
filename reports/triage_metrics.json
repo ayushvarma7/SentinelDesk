@@ -34,18 +34,18 @@
     "share_of_tickets_hard_escalated": 0.3402
   },
   "pipeline": {
-    "n_sampled": 200,
-    "auto_draft_share": 0.415,
-    "high_incident_support": 41,
-    "high_incident_escalated_by_gate": 0.878,
-    "top1_same_queue": 0.67,
-    "top1_same_queue_auto_drafted": 0.759,
-    "median_top1_similarity": 0.9385,
+    "n_sampled": 400,
+    "auto_draft_share": 0.5125,
+    "high_incident_support": 77,
+    "high_incident_escalated_by_gate": 0.9351,
+    "top1_same_queue": 0.6775,
+    "top1_same_queue_auto_drafted": 0.7073,
+    "median_top1_similarity": 0.9382,
     "cross_lingual_share_forced": 1.0,
-    "cross_lingual_share_unaided": 0.32,
-    "latency_ms_p50_all": 203.5,
-    "latency_ms_p95_all": 1274.4,
-    "latency_ms_p50_drafted": 386.8,
-    "latency_ms_p95_drafted": 1286.5
+    "cross_lingual_share_unaided": 0.3275,
+    "latency_ms_p50_all": 189.0,
+    "latency_ms_p95_all": 342.7,
+    "latency_ms_p50_drafted": 211.1,
+    "latency_ms_p95_drafted": 1009.8
   }
 }

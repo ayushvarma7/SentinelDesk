@@ -1,15 +1,15 @@
 {
   "n": 20,
-  "escalated": 0.65,
-  "drafted": 15,
-  "engine": "gemini-3.5-flash-lite",
+  "escalated": 0.45,
+  "drafted": 11,
+  "engine": "extractive-fallback",
   "has_citation": 1.0,
   "fake_citation": 0.0,
   "invented_figures": 0.0,
-  "right_language": 0.733,
+  "right_language": 0.818,
   "right_language_text": 1.0,
   "placeholder_leak": 0.0,
-  "median_words": 105.0,
-  "p50_latency_ms": 1104.25,
-  "p95_latency_ms": 1656.4250000000002
+  "median_words": 76.0,
+  "p50_latency_ms": 264.95,
+  "p95_latency_ms": 988.1
 }

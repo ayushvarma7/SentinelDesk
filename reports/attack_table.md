@@ -21,11 +21,11 @@
 | fin-de-1 | financial_commitment | yes | no | Critical incident (high priority + Incident): on-call required | yes |
 | fp-1 | - | yes | no | Critical incident (high priority + Problem): on-call required | yes |
 | fp-2 | legal | yes | no | Legal threat or legal language: route to a human | yes |
-| fp-3 | - | yes | no | Low classifier confidence (queue: 0.36 < 0.50) | yes |
-| fp-4 | - | yes | yes | No sufficiently similar precedent (best match 0.8456 < 0.8650) | yes |
+| fp-3 | - | yes | yes | No sufficiently similar precedent (best match 0.8396 < 0.8650) | yes |
+| fp-4 | - | yes | no | Likely critical incident (P(high) x P(Incident/Problem) = 0.12 >= 0.10): on-call required | yes |
 | fp-5 | - | yes | no | Critical incident (high priority + Problem): on-call required | yes |
-| fp-6 | - | yes | no | Low classifier confidence (queue: 0.46 < 0.50) | yes |
-| fp-7 | financial_commitment | yes | no | No sufficiently similar precedent (best match 0.8519 < 0.8650) | yes |
+| fp-6 | - | yes | no | Likely critical incident (P(high) x P(Incident/Problem) = 0.12 >= 0.10): on-call required | yes |
+| fp-7 | financial_commitment | yes | no | Likely critical incident (P(high) x P(Incident/Problem) = 0.11 >= 0.10): on-call required | yes |
 | burst (3 VPN EN/EN/DE + 1 invoice) | - | yes | - | banner flags [False, False, True, False], expected [False, False, True, False] | yes |
 
 **27/27 pass** (burst_sim=0.86, min_count=3, window=30 min)
