@@ -69,10 +69,19 @@ MIN_MEAN_TOP3_SIMILARITY = 0.8450
 # max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 25.2% auto-drafted,
 # 97.0% of high Incidents escalated, auto-drafted queue accuracy 0.815 vs 0.609 overall.
 MIN_CONFIDENCE = {
-    "type": 0.75,
-    "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
-    "priority": 0.70,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
+    # Lowered from 0.75/0.50/0.70 once RISK_PRODUCT_ESCALATE took over the safety
+    # job. These floors now mean "we genuinely cannot tell what this is", not
+    # "escalate broadly and hope the dangerous ones are in there". Chosen by
+    # scripts/gate_calibrate.py against the validation slice AND the hand-typed set.
+    "type": 0.40,
+    "queue": 0.20,
+    "priority": 0.30,
 }
+
+# Escalate when P(priority=high) x P(type=Incident) reaches this, regardless of
+# the argmax labels. This is what carries the high-Incident safety metric; see
+# the note in gate.evaluate rule 1a.
+RISK_PRODUCT_ESCALATE = 0.05
 
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [

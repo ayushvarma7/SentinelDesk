@@ -138,6 +138,25 @@ def evaluate(
     elif urgent_outage(text):
         reasons.append("Critical incident (reported outage with urgency): on-call required")
 
+    # 1a. Elevated incident risk, even when the argmax labels disagree.
+    #
+    # Rule 1 needs the classifier to get BOTH labels right, and it misses ~23% of
+    # true high-priority Incidents (type macro-F1 0.88, priority 0.62). Safety used
+    # to be recovered by setting the confidence floors below very high, which
+    # escalated ~70% of all traffic and 93% of hand-typed benign tickets.
+    #
+    # Keying on the probability of the dangerous class instead is strictly better.
+    # Measured on the 2,286-ticket validation slice at r=0.05:
+    #   high-Incident caught 0.956 (vs 0.956), traffic escalated 0.424 (vs ~0.70),
+    #   hand-typed benign wrongly caught 0.143 (vs 0.93).
+    # Proposed by P2; P3 owns the final value.
+    p_high = priority.all_probs.get("high", 0.0) if priority.all_probs else 0.0
+    p_inc = type_.all_probs.get("Incident", 0.0) if type_.all_probs else 0.0
+    risk = p_high * p_inc
+    if risk >= t.get("risk_product", config.RISK_PRODUCT_ESCALATE):
+        reasons.append(f"Elevated incident risk (P(high)xP(Incident) = {risk:.3f} "
+                       f">= {t.get('risk_product', config.RISK_PRODUCT_ESCALATE):.3f})")
+
     # 1b. Many near-identical tickets in a short window: probably a major incident.
     if burst and burst.get("active"):
         n = len(burst.get("related", [])) + 1
