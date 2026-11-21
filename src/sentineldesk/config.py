@@ -43,6 +43,11 @@ LIVE_META_PATH = LIVE_DIR / "live_meta.parquet"
 TOP_K = 5
 DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected
 
+# Places in the top-k reserved for a precedent in the OTHER language. e5 does
+# not bridge languages on its own: by DETECTED language only 1-3% of hits cross
+# over. 0 disables; evaluation passes 0 so metrics measure unaided retrieval.
+CROSS_LINGUAL_SLOTS = 1
+
 # --- escalation gate --------------------------------------------------------
 # EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is
 # already the top of the 15-25% target band. Keep the soft thresholds tight or the

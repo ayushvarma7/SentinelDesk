@@ -31,7 +31,7 @@ def main() -> None:
 
     top1_sims, same_queue, same_type, other_lang = [], [], [], []
     for i, qv in enumerate(Q):
-        hits = retrieve.search(qv, k=5, include_live=False)   # metrics must not see session state
+        hits = retrieve.search(qv, k=5, include_live=False, cross_lingual_slots=0)  # unaided retrieval
         truth = labels.loc[inputs["ticket_id"][i]]
         top1_sims.append(hits[0].score)
         same_queue.append(hits[0].queue == truth["queue"])

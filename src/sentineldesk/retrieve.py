@@ -156,8 +156,15 @@ def _row_to_precedent(row: pd.Series, score: float) -> Precedent:
     )
 
 
-def _candidates(store: dict, q: np.ndarray, k: int, queue_filter: str | None):
-    """Top candidates from one store as a list of (score, row_index)."""
+def _candidates(store: dict, q: np.ndarray, k: int, queue_filter: str | None,
+                exclude_language: str | None = None):
+    """Top candidates from one store as a list of (score, row_index).
+
+    exclude_language restricts the search to rows NOT in that language, which
+    is how the cross-lingual slots find anything: the unrestricted top-30 for a
+    German query is usually 30 German tickets, so a reserved slot has nothing
+    to put in it unless we search the other language's rows directly.
+    """
     matrix, meta = store["matrix"], store["meta"]
     if len(matrix) == 0:
         return []
@@ -168,7 +175,11 @@ def _candidates(store: dict, q: np.ndarray, k: int, queue_filter: str | None):
         sims = matrix @ q
 
     rows = np.arange(len(meta))
-    if queue_filter:
+    if exclude_language:
+        rows = (meta["language"].to_numpy() != exclude_language).nonzero()[0]
+        if len(rows) == 0:
+            return []
+    elif queue_filter:
         mask = (meta["queue"].to_numpy() == queue_filter).nonzero()[0]
         # Only trust the filter if it leaves room; a wrong queue prediction
         # (macro-F1 0.61) must never starve retrieval.
@@ -183,7 +194,9 @@ def _candidates(store: dict, q: np.ndarray, k: int, queue_filter: str | None):
 
 def search(query_vec: np.ndarray, k: int | None = None,
            queue_filter: str | None = None,
-           include_live: bool = True) -> list[Precedent]:
+           include_live: bool = True,
+           language: str | None = None,
+           cross_lingual_slots: int | None = None) -> list[Precedent]:
     """Top-k precedents across the frozen KB and the live store, best first.
 
     Vectors are L2-normalized, so the dot product is cosine similarity.
@@ -191,8 +204,16 @@ def search(query_vec: np.ndarray, k: int | None = None,
     include_live=False is mandatory for anything that produces a published
     number — scripts/evaluate.py, scripts/retrieval_check.py — so metrics never
     depend on what someone typed into the console.
+
+    cross_lingual_slots reserves places for the best precedent written in a
+    language OTHER than `language`. This is needed because e5 does NOT bridge
+    languages on its own: measured against DETECTED language (not the dataset's
+    noisy label), only 1-3% of unrestricted top-5 hits cross languages. The
+    apparent 16% in an earlier measurement was mislabelled tickets — "de" rows
+    written in English — not genuine cross-lingual matching.
     """
     k = k or config.TOP_K
+    slots = config.CROSS_LINGUAL_SLOTS if cross_lingual_slots is None else cross_lingual_slots
     q = np.asarray(query_vec, dtype=np.float32).reshape(-1)
 
     frozen = load_index()
@@ -202,16 +223,46 @@ def search(query_vec: np.ndarray, k: int | None = None,
         pools += [(live, s, i) for s, i in _candidates(live, q, k, queue_filter)]
     pools.sort(key=lambda t: -t[1])
 
+    def lang_of(store, i):
+        return str(store["meta"].iloc[i].get("language") or "")
+
     # Drop near-identical precedents: templated answers make five copies of one
     # resolution look like five independent sources, which misleads on screen.
     picked: list[tuple[dict, float, int]] = []
-    for store, score, i in pools:
-        if len(picked) >= k:
-            break
+
+    def try_add(store, score, i) -> bool:
         vec = store["matrix"][i]
         if any(float(vec @ s2["matrix"][j]) >= config.DEDUP_SIMILARITY
                for s2, _, j in picked):
-            continue
+            return False
         picked.append((store, score, i))
+        return True
 
+    reserve = slots if (language and slots) else 0
+    for store, score, i in pools:
+        if len(picked) >= k - reserve:
+            break
+        try_add(store, score, i)
+
+    # Fill the reserved places with the best other-language precedents, then
+    # top up with same-language ones if the KB has none to offer.
+    if reserve:
+        other = [(frozen, s2, i) for s2, i in
+                 _candidates(frozen, q, slots, None, exclude_language=language)]
+        if include_live:
+            other += [(live, s2, i) for s2, i in
+                      _candidates(live, q, slots, None, exclude_language=language)]
+        other.sort(key=lambda t: -t[1])
+        for store, score, i in other:
+            if len(picked) >= k:
+                break
+            if any(j == i and st is store for st, _, j in picked):
+                continue
+            try_add(store, score, i)
+        for store, score, i in pools:
+            if len(picked) >= k:
+                break
+            try_add(store, score, i)
+
+    picked.sort(key=lambda t: -t[1])
     return [_row_to_precedent(store["meta"].iloc[i], score) for store, score, i in picked]

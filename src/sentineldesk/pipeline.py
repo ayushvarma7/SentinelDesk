@@ -75,7 +75,8 @@ def triage(subject: str | None, body: str | None,
     if STAGES["retrieve"] and qvec is not None:
         from . import retrieve
         if retrieve.is_ready():
-            precedents = retrieve.search(qvec, config.TOP_K, preds["queue"].label)
+            precedents = retrieve.search(qvec, config.TOP_K, preds["queue"].label,
+                                         language=preds["language"].label)
         else:
             precedents = _stub_precedents()   # index not built yet
     else:
