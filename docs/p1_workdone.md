@@ -164,7 +164,9 @@ To plug in retrieval:
   p25 0.958 on 500 holdout tickets. Your query-vs-passage scores will differ, so measure them, but expect a narrow, high band.
 - **Retrieval quality (query-vs-query, 500 holdout tickets):**
   - the top-1 precedent has the same type 90.4% of the time and the same queue 76.0%;
-  - 16.2% of top-5 hits are in the other language, so cross-lingual matching works without extra work.
+  - ~~16.2% of top-5 hits are in the other language, so cross-lingual matching works without extra work.~~
+    **Corrected by P2:** measured against the *detected* language, only 1–3% of hits really cross languages. The 16%
+    was tickets labelled `de` but written in English. P2 added a reserved cross-lingual slot (`CROSS_LINGUAL_SLOTS`).
 - **Latency:** after warm-up, `encode` takes about 11 ms per ticket on CPU. The **first** `triage()` call takes about 4.5 s
   (model load), so the console should call `triage()` once at startup.
 
@@ -204,7 +206,12 @@ Incident "Outlook keeps crashing" ┘
 |---|---|---|
 | Critical rule | `gate.py` hard rule now fires on high + **Incident or Problem** (`config.CRITICAL_TYPES`) | Validation recall 0.803 → **0.882**; share escalated by this rule 26.2% → 36.5%. Holdout: 0.7729 → **0.8503** (34.2% escalated) |
 | Live grouping | `rootcause.GROUPER` links each new issue to live issues from the last 30 min at sim ≥ 0.89; 3+ → gate reason *"Probable shared root cause … raise a Problem record"* | 0.89 is just above the p90 of unrelated KB issue pairs (0.891). Test: 3 EN Outlook tickets group, invoice/VPN/printer stay separate; a German Outlook ticket joins through a bridging ticket |
-| Known history | Closest KB Problem and Change shown if sim ≥ 0.92 | 0.92 is about the p99 of unrelated pairs (0.917). At 0.88 vague tickets linked to off-topic problems, so they now show nothing. The detailed task-sync ticket links correctly (TKT-08224, 0.933) |
+| Known history | Closest KB Problem and Change, searched in **P2's retrieval index** (`kb_embeddings.npy`, Problem/Change rows only, query → passage); shown if sim ≥ 0.89 | Query → passage scale: unrelated issue → Problem/Change pairs p99 = 0.883; KB issues' best related Problem median 0.923. The task-sync ticket links correctly (TKT-08224, 0.899) |
+| Root-cause-aware RAG | If the known Problem wasn't already retrieved, the pipeline appends it to the precedents given to the drafter (after the gate, so similarity rules judge plain retrieval only) | 300 holdout tickets: 92% of issues linked to a known Problem, 59% to a known Change; Problem added to the RAG context 94 times; 15 extractive drafts cited it. p50 latency 13 ms end to end |
+
+**Limit:** hand-typed tickets score about 0.86–0.89 against the KB (P2 measured the same band), so for typed demo input
+the known-history link usually stays empty. The KB-style holdout tickets link 92% of the time. Lowering the threshold
+toward 0.875 would show more links but enters the unrelated-pair tail (p99 0.883).
 
 Contract changes, all backwards compatible:
 - `schema.RootCause` is new.

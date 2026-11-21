@@ -95,6 +95,13 @@ def triage(subject: str | None, body: str | None,
         text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, root_cause
     )
 
+    # Root-cause-aware RAG: if the ticket matches a known Problem that retrieval did not already
+    # return, give it to the drafter too, so the reply can cite the root cause. Added after the
+    # gate so the similarity rules still judge plain retrieval only.
+    if root_cause is not None and root_cause.known_problem is not None:
+        if root_cause.known_problem.ticket_id not in {p.ticket_id for p in precedents}:
+            precedents = precedents + [root_cause.known_problem]
+
     t = time.perf_counter()
     engine = None
     if escalate:

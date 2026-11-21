@@ -9,9 +9,14 @@ Two things per Incident/Problem ticket:
   2. Known history: the closest historical Problem and Change tickets in the KB, i.e. the probable
      root cause and how it was fixed before.
 
-Uses the same e5 query vectors as the classifier (artifacts/kb_query_embeddings.npy), so nothing
-is encoded twice. The dataset has no explicit Incident->Problem links, so thresholds are calibrated
-from similarity distributions (see config.py), not from labelled groups.
+Integration with RAG (Track B): known-history links search the SAME passage index as retrieval
+(retrieve.load_index(), artifacts/kb_embeddings.npy), restricted to Problem / Change rows, with the
+ticket's query vector, the proper e5 query->passage setup. No second KB copy is loaded. The pipeline
+then hands the known Problem to the drafter as an extra precedent, so a reply can cite the root cause.
+
+Live grouping compares live tickets with each other (query vs query), so it keeps its own threshold.
+The dataset has no explicit Incident->Problem links, so thresholds are calibrated from similarity
+distributions (see config.py), not from labelled groups.
 """
 from __future__ import annotations
 
@@ -19,7 +24,6 @@ import itertools
 import time
 from collections import deque
 from dataclasses import dataclass
-from functools import lru_cache
 
 import numpy as np
 
@@ -27,38 +31,36 @@ from . import config
 from .schema import Precedent, RootCause
 
 
-# --- known history in the KB -------------------------------------------------------
-@lru_cache(maxsize=1)
-def _kb_index():
-    from .data import load_kb
-    kb = load_kb()
-    E = np.load(config.KB_QUERY_EMB_PATH)
-    ids = np.load(config.KB_QUERY_EMB_PATH.with_name("kb_query_ids.npy"))
-    if not np.array_equal(ids, kb["ticket_id"].to_numpy(dtype=str)):
-        raise RuntimeError("kb_query_embeddings.npy does not match load_kb(); rerun scripts/train_classifier.py")
-    by_type = {t: np.where(kb["type"].to_numpy() == t)[0] for t in ("Problem", "Change")}
-    return kb, E, by_type
+# --- known history: Problem / Change rows of the retrieval index ---------------------
+_TYPE_ROWS: dict | None = None
 
 
-def _precedent(kb, j: int, score: float) -> Precedent:
-    r = kb.iloc[j]
-    return Precedent(ticket_id=r["ticket_id"], score=score, subject=r["subject"] or "",
-                     body_snippet=str(r["body"])[:200], answer=str(r["answer"]),
-                     language=r["language"], queue=r["queue"])
+def _type_rows(meta) -> dict:
+    global _TYPE_ROWS
+    if _TYPE_ROWS is None or _TYPE_ROWS["n"] != len(meta):
+        types = meta["type"].to_numpy()
+        _TYPE_ROWS = {"n": len(meta), **{t: np.where(types == t)[0] for t in ("Problem", "Change")}}
+    return _TYPE_ROWS
 
 
 def known_links(qvec: np.ndarray) -> tuple[Precedent | None, Precedent | None]:
-    """(closest KB Problem, closest KB Change), each None if below ROOT_CAUSE_LINK_MIN_SIM or no KB."""
-    try:
-        kb, E, by_type = _kb_index()
-    except FileNotFoundError:
+    """(closest KB Problem, closest KB Change), each None if below ROOT_CAUSE_LINK_MIN_SIM or no index."""
+    from . import retrieve
+    if not retrieve.is_ready():
         return None, None
+    idx = retrieve.load_index()
+    matrix, meta = idx["matrix"], idx["meta"]
+    rows_by_type = _type_rows(meta)
+    q = np.asarray(qvec, np.float32).reshape(-1)
     out = []
     for t in ("Problem", "Change"):
-        rows = by_type[t]
-        s = E[rows] @ np.asarray(qvec, np.float32)
+        rows = rows_by_type[t]
+        with np.errstate(all="ignore"):          # Accelerate BLAS sets spurious FP flags (see retrieve.py)
+            s = matrix[rows] @ q
         k = int(s.argmax())
-        out.append(_precedent(kb, int(rows[k]), float(s[k])) if s[k] >= config.ROOT_CAUSE_LINK_MIN_SIM else None)
+        score = float(s[k])
+        out.append(retrieve._row_to_precedent(meta.iloc[int(rows[k])], score)
+                   if score >= config.ROOT_CAUSE_LINK_MIN_SIM else None)
     return out[0], out[1]
 
 

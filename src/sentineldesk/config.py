@@ -43,9 +43,10 @@ ROOT_CAUSE_GROUP_SIM = 0.89
 ROOT_CAUSE_MIN_GROUP = 3             # this many similar live issues -> suggest raising a Problem
 ROOT_CAUSE_WINDOW_MIN = 30           # live issues older than this drop out of grouping
 ROOT_CAUSE_MIN_WORDS = 3             # too-short tickets ("help", emoji) are never grouped
-# Show a known KB Problem/Change only above the p99 of unrelated pairs: at 0.88-0.91, short vague
-# tickets ("Outlook down") linked to off-topic problems (crash assistance, Mailchimp sync).
-ROOT_CAUSE_LINK_MIN_SIM = 0.92
+# Known KB Problem/Change links search the retrieval (passage) index with the query vector, a
+# different scale from query-vs-query. Unrelated issue->Problem/Change pairs: p90=0.849, p99=0.883;
+# KB issues' best related Problem: p10=0.899, median 0.923. 0.89 sits just above unrelated p99.
+ROOT_CAUSE_LINK_MIN_SIM = 0.89
 
 # --- retrieval (Track B / P2) -----------------------------------------------
 KB_EMB_PATH = ARTIFACTS / "kb_embeddings.npy"        # KB encoded with is_query=False, for retrieval
