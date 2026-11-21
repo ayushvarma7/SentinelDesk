@@ -245,11 +245,33 @@ ul{max-width:66ch;padding-left:1.2em}li{margin-bottom:.4em}
 
 <h2>Known limits</h2>
 
+<p><b>Hand-typed benign tickets auto-draft at 2 of 14.</b> The generator is not the problem — it scores 1.00 on citations and 0.00 on every failure mode. The gate does not let it run. Cause breakdown for the twelve blocked:</p>
+
+<div class="tbl"><table>
+<thead><tr><th>Cause</th><th>Count</th></tr></thead>
+<tbody>
+<tr><td>confidence floor (queue 0.50)</td><td class="n">6</td></tr>
+<tr><td>hard rule (high + Incident/Problem)</td><td class="n">3</td></tr>
+<tr><td>similarity floor (0.865)</td><td class="n">3</td></tr>
+<tr><td>model reported not grounded</td><td class="n">0</td></tr>
+</tbody></table></div>
+
+<div class="note stop"><p><b>A correction to an earlier version of this page.</b> It attributed part of this to the KB lacking coverage and the model refusing to ground an answer. The measurement does not show that — zero of the twelve are grounding refusals. All are threshold decisions.</p>
+<p>Three clearly in-domain tickets: <i>password reset</i> (top-1 0.909, drafts fine); <i>invoice charged twice</i> (top-1 0.879, precedent reads "we will investigate the duplicate charge issue and process the necessary refund", yet escalates as a high-priority Problem); <i>adding a new user</i> (top-1 0.847, blocked by <span class="m">queue 0.40 &lt; 0.50</span>). The precedents are there and they answer the question.</p></div>
+
+<p><span class="m">CRITICAL_TYPES</span> includes <span class="m">Problem</span>, added because the classifier confuses it with Incident. Reasonable alone, but the hard rule now escalates <b>34.2% of all holdout tickets</b> before any other rule fires.</p>
+
+<div class="tbl"><table>
+<thead><tr><th>Change</th><th>Clears</th><th>Cost</th></tr></thead>
+<tbody>
+<tr><td>CRITICAL_TYPES → Incident only</td><td class="n">3</td><td>Removes cover duplicated by rule 1a</td></tr>
+<tr><td>queue floor 0.50 → 0.25</td><td class="n">6</td><td>high-Inc 0.946 → 0.884</td></tr>
+<tr><td>similarity floor 0.865 → 0.845</td><td class="n">3</td><td>A weak signal anyway</td></tr>
+</tbody></table></div>
+
 <ul>
-<li>Hand-typed benign tickets auto-draft at 2 of 14. Several people retuned the gate independently after the sweep, so the current thresholds no longer reflect a single measurement.</li>
-<li>Part of that is correct behaviour, not miscalibration. For <i>"How do I export my data to CSV?"</i> the nearest precedents are about API integration and SaaS customisation. None answers it, the model sets <span class="m">grounded: false</span>, and the ticket escalates. The synthetic KB genuinely lacks coverage of what people type.</li>
-<li>The similarity signal separates in-domain from off-domain by about 0.005 — in-domain 0.869–0.906, off-domain 0.855–0.864, gibberish 0.833. Treat it as weak evidence.</li>
-<li><span class="m">cross_lingual_share_unaided</span> of 0.325 still compares labels, which overstate the true rate roughly tenfold. It is an upper bound.</li>
+<li>The similarity signal separates in-domain from off-domain by about 0.005 — in-domain 0.869–0.906, off-domain 0.855–0.864, gibberish 0.833. Weak evidence.</li>
+<li><span class="m">cross_lingual_share_unaided</span> of 0.325 still compares labels, which overstate the true rate roughly tenfold. An upper bound; the forced slot is verified working in both directions.</li>
 </ul>
 
 <h2>Running it</h2>
