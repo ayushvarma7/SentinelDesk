@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 
 from . import config
+from .generate import unsupported_figures  # noqa: F401  (P2 implements, gate re-exports)
 from .schema import Precedent, Prediction
 
 _ACTION_RE = [re.compile(p, re.I) for p in config.UNSUPPORTED_ACTION_PATTERNS]

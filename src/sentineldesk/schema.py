@@ -48,6 +48,10 @@ class TriageResult:
     masked_pii: dict[str, int]             # {"email": 2, "ip": 1}
     latency_ms: dict[str, float]           # embed / classify / retrieve / generate / total
 
+    # Which path produced the draft: the model name, "extractive-fallback", or
+    # None when the ticket was escalated and no draft was written.
+    engine: str | None = None
+
     @property
     def overall_confidence(self) -> float:
         """A ticket is only as trustworthy as its least certain head."""

@@ -17,7 +17,7 @@ STAGES = {
     "embed": True,       # Track A wired embed.encode (Track B owns the file)
     "classify": True,    # Track A: falls back to the stub if artifacts/heads.joblib is missing
     "retrieve": True,    # Track B: real index, stub fallback if artifacts are missing
-    "generate": False,
+    "generate": True,    # Track C: Gemini when a key exists, extractive fallback otherwise
 }
 
 
@@ -87,11 +87,22 @@ def triage(subject: str | None, body: str | None,
     )
 
     t = time.perf_counter()
+    engine = None
     if escalate:
+        # An escalated ticket gets no draft at all. Showing the operator a
+        # suggested reply next to "escalate to on-call" invites them to send it.
         draft_reply, cited, unverified = None, [], []
+    elif STAGES["generate"]:
+        from . import generate
+        d = generate.draft(masked_text, preds["language"].label, precedents)
+        draft_reply = d["reply"]
+        cited, unverified, engine = d["cited_ticket_ids"], d["unverified_claims"], d["engine"]
+        if not d["grounded"]:
+            escalate = True
+            reasons.append("Draft not grounded in the retrieved precedents")
+            draft_reply, cited = None, []
     else:
-        draft_reply = "[stub draft — Track C]"   # TODO Track C
-        cited, unverified = [p.ticket_id for p in precedents], []
+        draft_reply, cited, unverified = "[stub draft]", [p.ticket_id for p in precedents], []
     latency["generate"] = (time.perf_counter() - t) * 1000
     latency["total"] = (time.perf_counter() - t0) * 1000
 
@@ -108,4 +119,5 @@ def triage(subject: str | None, body: str | None,
         unverified_claims=unverified,
         masked_pii=masked_counts,
         latency_ms=latency,
+        engine=engine,
     )
