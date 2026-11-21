@@ -164,7 +164,9 @@ To plug in retrieval:
   p25 0.958 on 500 holdout tickets. Your query-vs-passage scores will differ, so measure them, but expect a narrow, high band.
 - **Retrieval quality (query-vs-query, 500 holdout tickets):**
   - the top-1 precedent has the same type 90.4% of the time and the same queue 76.0%;
-  - 16.2% of top-5 hits are in the other language, so cross-lingual matching works without extra work.
+  - ~~16.2% of top-5 hits are in the other language, so cross-lingual matching works without extra work.~~
+    **Corrected by P2:** measured against the *detected* language, only 1–3% of hits really cross languages. The 16%
+    was tickets labelled `de` but written in English. P2 added a reserved cross-lingual slot (`CROSS_LINGUAL_SLOTS`).
 - **Latency:** after warm-up, `encode` takes about 11 ms per ticket on CPU. The **first** `triage()` call takes about 4.5 s
   (model load), so the console should call `triage()` once at startup.
 
@@ -188,6 +190,42 @@ The thresholds in `config.py` were set before any model existed:
 
 Tune on the same validation slice the classifier held out (`RandomState(42).permutation(len(kb))[:2286]`). The saved
 heads were trained without those rows, so the confidences there are honest.
+
+## 6b. Root-cause grouping (added after the first push)
+
+`src/sentineldesk/rootcause.py` (Track A) follows the ITIL model:
+
+```
+Request  "I need a laptop"            -> fulfilled, no root cause
+Incident "Outlook not working"    ┐
+Incident "Can't receive mails"    ├─ many -> one  Problem "Outlook mail sync broken" ── fixed by ─> Change(s)
+Incident "Outlook keeps crashing" ┘
+```
+
+| Piece | What it does | Evidence |
+|---|---|---|
+| Critical rule | `gate.py` hard rule now fires on high + **Incident or Problem** (`config.CRITICAL_TYPES`) | Validation recall 0.803 → **0.882**; share escalated by this rule 26.2% → 36.5%. Holdout: 0.7729 → **0.8503** (34.2% escalated) |
+| Live grouping | `rootcause.GROUPER` links each new issue to live issues from the last 30 min at sim ≥ 0.89; 3+ → gate reason *"Probable shared root cause … raise a Problem record"* | 0.89 is just above the p90 of unrelated KB issue pairs (0.891). Test: 3 EN Outlook tickets group, invoice/VPN/printer stay separate; a German Outlook ticket joins through a bridging ticket |
+| Known history | Closest KB Problem and Change, searched in **P2's retrieval index** (`kb_embeddings.npy`, Problem/Change rows only, query → passage); shown if sim ≥ 0.89 | Query → passage scale: unrelated issue → Problem/Change pairs p99 = 0.883; KB issues' best related Problem median 0.923. The task-sync ticket links correctly (TKT-08224, 0.899) |
+| Root-cause-aware RAG | If the known Problem wasn't already retrieved, the pipeline appends it to the precedents given to the drafter (after the gate, so similarity rules judge plain retrieval only) | 300 holdout tickets: 92% of issues linked to a known Problem, 59% to a known Change; Problem added to the RAG context 94 times; 15 extractive drafts cited it. p50 latency 13 ms end to end |
+
+**Limit:** hand-typed tickets score about 0.86–0.89 against the KB (P2 measured the same band), so for typed demo input
+the known-history link usually stays empty. The KB-style holdout tickets link 92% of the time. Lowering the threshold
+toward 0.875 would show more links but enters the unrelated-pair tail (p99 0.883).
+
+Contract changes, all backwards compatible:
+- `schema.RootCause` is new.
+- `TriageResult.root_cause` is optional and defaults to None.
+- `gate.evaluate(..., root_cause=None)` takes a new optional argument.
+
+Latency is about 3–5 ms per ticket, plus about 190 ms once while the KB index loads.
+
+Decision for the gate owner: the critical rule's escalation volume (36% on validation) is above the scaffold's 15–25%
+target. Recall versus volume is a product call. To revert, set `CRITICAL_TYPES = ("Incident",)`.
+
+Limits:
+- The dataset has no Incident → Problem links, so grouping accuracy can't be scored, only demonstrated.
+- Grouping is per process, in memory, and resets on restart.
 
 ## 7. Open items
 

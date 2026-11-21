@@ -18,8 +18,9 @@ EMBED_DIM = 384
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
 
-LLM_MODEL = "gemini-3.8-flash"   # P2.1: 2.5-flash is closed to new keys (404)
+LLM_MODEL = "gemini-3.5-flash-lite"   # P2.1: 2.5-* are retired (404); 3.5-flash 504s on capacity
 LLM_MAX_TOKENS = 1024
+LLM_TIMEOUT_MS = 20000   # past this, fall back to extractive rather than stall the UI
 
 # --- triage classifier (Track A) ------------------------------------------------
 # Frozen on the KB validation slice (docs/p1_workdone.md): word TF-IDF || e5 query embedding.
@@ -30,6 +31,25 @@ CLASSIFIER_EMB_WEIGHT = 1.0
 HIGH_PRIORITY_TARGET_RECALL = 0.80   # P(high) threshold is the highest one reaching this on validation
 HIGH_PRIORITY_THRESHOLD = 0.25       # value tuned by scripts/train_classifier.py (also stored in heads.joblib)
 VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).permutation(len(kb)); gate tuning reuses it
+
+# --- root cause (Track A, ITIL: many Incidents -> one Problem -> fixed by Changes) ----
+# Incident vs Problem is a relationship, not a wording difference (712 of 760 type errors are
+# Incident<->Problem), so the critical-escalation rule treats both as "service is broken".
+# Validation: high-priority Incident recall 0.803 (Incident only) -> 0.882 (Incident or Problem).
+CRITICAL_TYPES = ("Incident", "Problem")
+# Escalate to on-call when P(high) x P(Incident or Problem) >= this (gate rule 1a). None disables.
+# Chosen by scripts/escalation_sweep.py on the KB validation slice (see reports/escalation_sweep.json).
+CRITICAL_SCORE_MIN = 0.20
+# Similarity (e5 query vectors) above which two issues are treated as the same root cause.
+# Calibrated on KB issue pairs from different queues with no shared tag: p90=0.891, p99=0.917.
+ROOT_CAUSE_GROUP_SIM = 0.89
+ROOT_CAUSE_MIN_GROUP = 3             # this many similar live issues -> suggest raising a Problem
+ROOT_CAUSE_WINDOW_MIN = 30           # live issues older than this drop out of grouping
+ROOT_CAUSE_MIN_WORDS = 3             # too-short tickets ("help", emoji) are never grouped
+# Known KB Problem/Change links search the retrieval (passage) index with the query vector, a
+# different scale from query-vs-query. Unrelated issue->Problem/Change pairs: p90=0.849, p99=0.883;
+# KB issues' best related Problem: p10=0.899, median 0.923. 0.89 sits just above unrelated p99.
+ROOT_CAUSE_LINK_MIN_SIM = 0.89
 
 # --- retrieval (Track B / P2) -----------------------------------------------
 KB_EMB_PATH = ARTIFACTS / "kb_embeddings.npy"        # KB encoded with is_query=False, for retrieval
@@ -68,10 +88,11 @@ MIN_MEAN_TOP3_SIMILARITY = 0.8450
 # max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 25.2% auto-drafted,
 # 97.0% of high Incidents escalated, auto-drafted queue accuracy 0.815 vs 0.609 overall.
 MIN_CONFIDENCE = {
-    "type": 0.75,
+    "type": 0.0,
     "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
-    "priority": 0.70,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
+    "priority": 0.0,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
 }
+
 
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [

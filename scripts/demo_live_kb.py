@@ -3,7 +3,7 @@
     PYTHONPATH=src python scripts/demo_live_kb.py
 """
 from sentineldesk import config, embed, retrieve
-from sentineldesk.pipeline import triage
+from sentineldesk.pipeline import resolve_ticket, triage
 from sentineldesk.text import build_text
 
 NEW = ("Qubit calibration drift on the Q-series SDK",
@@ -39,8 +39,8 @@ def main():
     show("incoming", *NEW)
 
     print("\n[2] A human resolves it. The resolution becomes a precedent.")
-    new_id = retrieve.add_precedent(subject=NEW[0], body=NEW[1], answer=RESOLUTION,
-                                    language="en", queue="Technical Support", type_="Problem")
+    new_id = resolve_ticket(NEW[0], NEW[1], resolution=RESOLUTION,
+                            resolved_by="demo-agent")["ticket_id"]
     print(f"    added {new_id}   LIVE STORE: {retrieve.live_count()}   "
           f"(frozen KB untouched: {len(retrieve.load_index()['meta']):,})")
 
