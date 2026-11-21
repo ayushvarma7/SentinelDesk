@@ -18,7 +18,7 @@ EMBED_DIM = 384
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
 
-LLM_MODEL = "gemini-2.5-flash"      # team plan is Gemini (GDG event); P2.1 checks it against the live list
+LLM_MODEL = "gemini-3.8-flash"   # P2.1: 2.5-flash is closed to new keys (404)
 LLM_MAX_TOKENS = 1024
 
 # --- triage classifier (Track A) ------------------------------------------------
