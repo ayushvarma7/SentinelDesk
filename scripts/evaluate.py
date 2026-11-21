@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 
-from sentineldesk import classify, config
+from sentineldesk import classify, config, embed  # noqa: F401  (embed used in pipeline_section)
 from sentineldesk.data import build_text, load_test_inputs, load_test_labels
 from sentineldesk.embed import encode
 
@@ -71,7 +71,15 @@ def pipeline_section(inputs, labels) -> dict:
             "true_high_incident": g["priority"] == "high" and g["type"] == "Incident",
             "top1_sim": r.precedents[0].score if r.precedents else 0.0,
             "top1_same_queue": bool(r.precedents) and r.precedents[0].queue == g["queue"],
-            "cross_lingual": any(p.language != r.language for p in r.precedents),
+            # The reserved slot guarantees a cross-lingual hit, so that share is
+            # 1.0 by construction and says nothing. Measure the UNAIDED rate too.
+            "cross_lingual_forced": any(p.language != r.language for p in r.precedents),
+            "cross_lingual_unaided": any(
+                h.language != r.language
+                for h in retrieve.search(embed.encode([build_text(t["subject"], t["body"])],
+                                                      is_query=True)[0],
+                                         config.TOP_K, include_live=False,
+                                         cross_lingual_slots=0)),
             "latency_ms": (time.perf_counter() - t0) * 1000,
         })
 
@@ -86,9 +94,14 @@ def pipeline_section(inputs, labels) -> dict:
         "top1_same_queue": round(float(df["top1_same_queue"].mean()), 4),
         "top1_same_queue_auto_drafted": round(float(auto["top1_same_queue"].mean()), 4) if len(auto) else None,
         "median_top1_similarity": round(float(df["top1_sim"].median()), 4),
-        "cross_lingual_share": round(float(df["cross_lingual"].mean()), 4),
-        "latency_ms_p50": round(float(df["latency_ms"].quantile(0.50)), 1),
-        "latency_ms_p95": round(float(df["latency_ms"].quantile(0.95)), 1),
+        "cross_lingual_share_forced": round(float(df["cross_lingual_forced"].mean()), 4),
+        "cross_lingual_share_unaided": round(float(df["cross_lingual_unaided"].mean()), 4),
+        # Escalated tickets skip the LLM entirely, so an overall p50 flatters the
+        # system. The number that matters for the demo is the drafted one.
+        "latency_ms_p50_all": round(float(df["latency_ms"].quantile(0.50)), 1),
+        "latency_ms_p95_all": round(float(df["latency_ms"].quantile(0.95)), 1),
+        "latency_ms_p50_drafted": round(float(auto["latency_ms"].quantile(0.50)), 1) if len(auto) else None,
+        "latency_ms_p95_drafted": round(float(auto["latency_ms"].quantile(0.95)), 1) if len(auto) else None,
     }
 
 
