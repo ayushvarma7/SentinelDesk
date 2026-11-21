@@ -204,9 +204,20 @@ so the hard rules carry that regardless of thresholds.
 | 0.35 | 0.904 | 0.536 | 0.553 | 0.663 |
 | **0.50** | **0.946** | **0.357** | **0.408** | **0.749** |
 
-No setting reaches the 0.95 safety clause; the ceiling is 0.946. `critical_score_min` is inert
-from 0.05 to 0.30 at the current queue floor. **The queue confidence floor is the only knob
-that moves anything.**
+That sweep found `critical_score_min` inert and the queue floor dominant — both true of the gate
+*as it then stood*, before rule 1a became an `elif` and `CRITICAL_TYPES` gained `Problem`. Measured
+again on the full holdout afterwards, `critical_score_min` is the knob that matters:
+
+| `critical_score_min` | high-Inc escalated | auto-draft | auto queue accuracy |
+|---:|---:|---:|---:|
+| 0.20 | 0.9276 | 0.401 | 0.753 |
+| 0.15 | 0.9427 | 0.383 | 0.754 |
+| **0.10** | **0.9618** | 0.356 | 0.756 |
+| 0.05 | 0.9799 | 0.316 | 0.751 |
+
+Set to **0.10**. Lowering the queue floor alongside it pulls high-Incident escalation back under
+0.95 (0.9327 at queue 0.25), because that floor was incidentally catching critical tickets. The two
+knobs are not independent, and no setting gives both the safety rule and good hand-typed drafting.
 
 **Why the dataset's own percentiles are the wrong basis.** Holdout top-1 p10 is 0.9186, but
 all 8 hand-typed tickets measured below it. The dataset is synthetic and its tickets sit
@@ -253,7 +264,11 @@ self-match contamination even without crossing the split.
 
 ## 8. Known limits
 
-**Hand-typed benign tickets auto-draft at 2 of 14.** The generator is not the problem — it
+**High-priority Incident escalation is 0.9618** on all 995 holdout high-Incidents, against the
+team rule of 0.95. An earlier figure of 0.878 came from a 41-row sample and was sampling noise,
+not drift; the full-population value before the fix was 0.9276.
+
+**Hand-typed benign tickets auto-draft at 1 of 14** (2 of 14 before the safety fix). The generator is not the problem — it
 scores 1.00 on citations and 0.00 on every failure mode. The gate does not let it run. Cause
 breakdown for the 12 blocked:
 

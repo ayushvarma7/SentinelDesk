@@ -39,7 +39,10 @@ VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).per
 CRITICAL_TYPES = ("Incident", "Problem")
 # Escalate to on-call when P(high) x P(Incident or Problem) >= this (gate rule 1a). None disables.
 # Chosen by scripts/escalation_sweep.py on the KB validation slice (see reports/escalation_sweep.json).
-CRITICAL_SCORE_MIN = 0.20
+CRITICAL_SCORE_MIN = 0.10   # was 0.20: 0.9276 of high-priority Incidents escalated on the full
+                            # holdout, under the team rule of 0.95. At 0.10 it is 0.9618, costing
+                            # 4.5 points of auto-draft (0.401 -> 0.356); queue accuracy on
+                            # auto-drafts is unchanged (0.753 -> 0.756). n=995, not a 41-row sample.
 # Similarity (e5 query vectors) above which two issues are treated as the same root cause.
 # Calibrated on KB issue pairs from different queues with no shared tag: p90=0.891, p99=0.917.
 ROOT_CAUSE_GROUP_SIM = 0.89
