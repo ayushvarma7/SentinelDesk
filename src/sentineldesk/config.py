@@ -49,12 +49,18 @@ DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already
 # overall escalation rate balloons past 40% and the copilot looks useless.
 # Tune these in scripts/evaluate.py, do not guess them.
 MIN_CONFIDENCE = {
-    "type": 0.50,
-    "queue": 0.45,      # 10 classes at 21x imbalance, so expect lower confidence here
-    "priority": 0.55,   # EDA says priority is weakly predictable; this may need lowering
+    "type": 0.55,
+    "queue": 0.30,       # 10 classes at 21x imbalance; confidences genuinely sit 0.3-0.5
+    "priority": 0.50,    # recall-tuned P(high)=0.25 means "high" can carry low confidence
 }
-MIN_TOP1_SIMILARITY = 0.72
-MIN_MEAN_TOP3_SIMILARITY = 0.65
+# Calibrated on HAND-TYPED tickets, not holdout percentiles. The holdout p10 is
+# 0.9186, but the dataset is synthetic and its own tickets sit unusually close
+# to the KB: 8/8 hand-written tickets scored below that, so a holdout-derived
+# threshold escalates 100% of judge input. Measured bands with hand-typed text:
+#   in-domain 0.869-0.906 | off-domain 0.855-0.864 | gibberish 0.833
+# The margin is thin (~0.005), so treat similarity as a WEAK signal. P3 to sweep.
+MIN_TOP1_SIMILARITY = 0.8650
+MIN_MEAN_TOP3_SIMILARITY = 0.8450   # hand-typed mean top-3 sits ~0.86-0.87; P3 to sweep
 
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [

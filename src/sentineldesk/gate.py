@@ -49,12 +49,12 @@ def evaluate(
         top1 = precedents[0].score
         if top1 < min_top1:
             reasons.append(
-                f"No sufficiently similar precedent (best match {top1:.2f} < {min_top1:.2f})"
+                f"No sufficiently similar precedent (best match {top1:.3f} < {min_top1:.3f})"
             )
         top3 = [p.score for p in precedents[:3]]
         mean3 = sum(top3) / len(top3)
         if mean3 < min_mean3:
-            reasons.append(f"Weak precedent support (mean top-3 {mean3:.2f} < {min_mean3:.2f})")
+            reasons.append(f"Weak precedent support (mean top-3 {mean3:.3f} < {min_mean3:.3f})")
 
     # 5. Commitments we cannot make unless a past resolution made them too.
     if any(r.search(text) for r in _ACTION_RE):
