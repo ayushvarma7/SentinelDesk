@@ -24,6 +24,9 @@ _INDEX: dict | None = None
 _LIVE: dict | None = None
 
 META_COLUMNS = ["ticket_id", "subject", "body", "answer", "language", "queue", "type", "priority"]
+# The live store carries two extra provenance columns; the frozen index has no
+# use for them and _row_to_precedent reads everything with .get().
+LIVE_COLUMNS = META_COLUMNS + ["resolved_by", "resolved_at"]
 SNIPPET_CHARS = 240
 
 
@@ -86,7 +89,7 @@ def is_ready() -> bool:
 
 def _empty_live() -> dict:
     return {"matrix": np.zeros((0, config.EMBED_DIM), dtype=np.float32),
-            "meta": pd.DataFrame(columns=META_COLUMNS)}
+            "meta": pd.DataFrame(columns=LIVE_COLUMNS)}
 
 
 def load_live() -> dict:
@@ -113,27 +116,48 @@ def clear_live() -> None:
 
 
 def add_precedent(subject: str | None, body: str | None, answer: str,
-                  language: str, queue: str = "", type_: str = "") -> str:
-    """Add a resolved ticket to the live store and return its LIVE-xxxxx id.
+                  language: str, queue: str = "", type_: str = "",
+                  resolved_by: str = "") -> str:
+    """Add a HUMAN-RESOLVED ticket to the live store and return its LIVE-xxxxx id.
 
-    This is the escalation loop closing: the gate says "no precedent", a human
+    This is the escalation loop closing: the gate says "no precedent", a person
     resolves it, and the resolution becomes retrievable for the next ticket.
     Costs one encode (~11 ms) — there is no index to rebuild.
+
+    `resolved_by` is required and recorded. A KB is only as good as what goes
+    into it: if an AI draft could become a precedent, the next draft would be
+    grounded in the previous guess, and the one after that in the guess about
+    the guess. Every row here must trace back to a named person.
+
+    Call it through pipeline.resolve_ticket(), which fills in the labels.
     """
     from . import embed
 
     answer = (answer or "").strip()
     if not answer:
         raise ValueError("a precedent needs an answer; that is the whole point of it")
+    if not (resolved_by or "").strip():
+        raise ValueError(
+            "resolved_by is required: only human-written resolutions may become precedents"
+        )
 
     live = load_live()
-    ticket_id = f"LIVE-{len(live['meta']) + 1:05d}"
+
+    # Resolving the same ticket twice must not add it twice.
     text = build_text(subject, body)
+    if len(live["meta"]):
+        same = live["meta"][(live["meta"]["subject"].fillna("") == (subject or ""))
+                            & (live["meta"]["body"].fillna("") == (body or ""))]
+        if len(same):
+            return str(same.iloc[0]["ticket_id"])
+
+    ticket_id = f"LIVE-{len(live['meta']) + 1:05d}"
     vec = embed.encode([text], is_query=False)[0]
 
     row = {"ticket_id": ticket_id, "subject": subject or "", "body": body or "",
            "answer": answer, "language": language, "queue": queue, "type": type_,
-           "priority": ""}
+           "priority": "", "resolved_by": resolved_by.strip(),
+           "resolved_at": pd.Timestamp.utcnow().isoformat(timespec="seconds")}
     live["matrix"] = np.vstack([live["matrix"], vec[None, :]]).astype(np.float32)
     live["meta"] = pd.concat([live["meta"], pd.DataFrame([row])], ignore_index=True)
 

@@ -54,6 +54,78 @@ PYTHONPATH=src python -m pytest -q tests/           # contract + gate + adversar
 PYTHONPATH=src python scripts/attack_table.py      # -> reports/attack_table.md
 ```
 
+### Console (Streamlit)
+
+```bash
+PYTHONPATH=src python scripts/build_kb_index.py     # once: the retrieval index the console needs
+streamlit run app.py                                # http://localhost:8501
+```
+
+- **Customer portal** (`/customer`): users file **Incidents** or **Requests** only. Problems and Changes are raised
+  by the organisation from incidents.
+  - Every submission runs through the real pipeline (`sentinel_ui/backend.py`) and is stored in
+    `data/live_tickets.json` as `INC…` / `REQ…`.
+  - The form's choice is the ticket type of record; the model's type is shown as the AI's opinion.
+  - Priority: incidents take the more urgent of the model and the form's impact × urgency matrix, and a ticket the
+    gate sends to on-call is always P1.
+  - Assignment: on-call engineer for `ESCALATE_ONCALL`, otherwise the predicted queue's group.
+- **Organisation** (`/agent`): ticket list, ticket form with SLA timer, the gate's three-tier status, and the AI draft.
+- **Dashboard** (`/dashboard`): volume charts and the holdout metrics from `reports/triage_metrics.json`.
+- Tick "Use mock backend" in the Organisation sidebar to run without models.
+
+#### Sign in
+
+1. Open http://localhost:8501 and click **Customer portal** in the left sidebar.
+2. Optional: pick **English** or **Deutsch** at the top right. The whole portal switches language.
+3. Sign in with a demo account. These are demo accounts in `sentinel_ui/common.py` (`DEMO_USERS`), not real
+   Northeastern authentication:
+
+   | Email | Password |
+   |---|---|
+   | `demo@northeastern.edu` | `demo` |
+   | `nima@northeastern.edu` | `husky2026` |
+   | `prof@northeastern.edu` | `demo` |
+
+4. You land on "Hi <name>, how can we help today?". The pill under it shows service status; it turns red when
+   several urgent incidents arrive within an hour.
+
+#### Report an incident (something is broken)
+
+1. Open the **Report an incident** tab. A **Popular services** tile pre-selects the service.
+2. Fill in:
+   - **What isn't working?**: the service, e.g. *VPN or campus network*.
+   - **Who is affected?**: *Just me*, *My class or team*, or *A whole department or building* (impact).
+   - **How urgent is it for you?**: *Low*, *Medium* or *High* (urgency).
+   - **Short summary**: optional.
+   - **Describe it in your own words**: required, in English or German.
+3. Click **Submit incident**. The ticket goes through the full pipeline (a few seconds for the first ticket while
+   the models load) and you get a number like `INC0000001`:
+   - **Red badge, "went straight to the on-call team"**: the gate escalated it (`ESCALATE_ONCALL`). The ticket is
+     P1 and assigned to the on-call engineer.
+   - **Green badge, "Your ticket is with the <team> team"**: it was routed to the predicted queue. If the gate
+     found good precedents, similar solved issues are listed underneath.
+
+#### Request something (a service or information)
+
+1. Open the **Request something** tab.
+2. Pick **What do you need?** (account, software, billing, product information, something else), add a summary,
+   and describe the request.
+3. Click **Submit request**. You get a number like `REQ0000001` and the team it was routed to.
+
+#### Track and work tickets
+
+- **My tickets** (portal tab): your tickets with number, opened time, team and status.
+- **Organisation** (sidebar): the service-desk view.
+  1. Portal tickets are listed first, then the history.
+  2. Click a row to open it. You get the customer's message, the ticket form (state, priority P1–P3, assignment
+     group) with **Save changes**, and the SLA timer: P1 4 h, P2 8 h, P3 24 h.
+  3. The **AI assistant** panel shows the gate's status and reasons, the AI's type and priority next to the
+     customer's own, and the drafted reply with the past tickets it cites.
+  4. **Send this reply and resolve** closes the ticket with that reply.
+- **Dashboard** (sidebar): volume by team, priority and type, plus the holdout model metrics; portal tickets are
+  included when the toggle is on.
+- **Start clean:** portal tickets live in `data/live_tickets.json` (gitignored). Delete that file to reset the demo.
+
 ## Pipeline status
 
 | Stage | Status |

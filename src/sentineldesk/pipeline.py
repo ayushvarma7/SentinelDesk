@@ -193,3 +193,94 @@ def triage(subject: str | None, body: str | None,
         root_cause=root_cause,
         engine=engine,
     )
+
+
+def triage_ticket(subject: str | None, body: str | None,
+                  thresholds: dict | None = None) -> dict:
+    """Dict-shaped adapter for the Streamlit console (frontend-ui).
+
+    The UI resolves SENTINEL_BACKEND, default "sentineldesk.pipeline:triage_ticket",
+    and expects the same shape mock_desk.triage_ticket returns. Without this it
+    cannot import a callable by that name, catches the error, and SILENTLY falls
+    back to the mock — so the console looks like it works while showing invented
+    data. Keep the keys below in step with sentinel_ui.common.normalize_result().
+
+    triage() and TriageResult remain the real contract; this is a thin projection.
+    """
+    r = triage(subject, body, thresholds=thresholds)
+
+    def pred(p) -> dict:
+        return {"label": p.label, "confidence": round(float(p.confidence), 4)}
+
+    return {
+        "language": r.language,
+        "type": pred(r.type),
+        "queue": pred(r.queue),
+        "priority": pred(r.priority),
+        "escalation": {"escalate": bool(r.escalate), "reasons": list(r.escalation_reasons)},
+        "retrieved": [
+            {"ticket_id": p.ticket_id,
+             "similarity": round(float(p.score), 4),
+             "language": p.language,
+             "subject": p.subject,
+             "answer_snippet": p.answer[:450]}
+            for p in r.precedents
+        ],
+        "draft": r.draft_reply,
+        "cited_ids": list(r.cited_ticket_ids),
+        # masked_pii is {kind: count}; the UI wants a flat list of what was found.
+        "pii_found": [k for k, n in (r.masked_pii or {}).items() if n],
+        "latency_ms": {
+            "triage": round(r.latency_ms.get("embed", 0.0) + r.latency_ms.get("classify", 0.0), 1),
+            "retrieval": round(r.latency_ms.get("retrieve", 0.0), 1),
+            "generation": round(r.latency_ms.get("generate", 0.0), 1),
+            "total": round(r.latency_ms.get("total", 0.0), 1),
+        },
+        "engine": r.engine,
+        "unverified_claims": list(r.unverified_claims),
+    }
+
+
+def resolve_ticket(subject: str | None, body: str | None, resolution: str,
+                   resolved_by: str, queue: str | None = None,
+                   type_: str | None = None, language: str | None = None) -> dict:
+    """Close the loop: a human resolved this ticket, so it becomes a precedent.
+
+    Call this from the agent console when an agent marks a ticket resolved and
+    has written the resolution text — never on an AI draft, and never on
+    submission. A ticket arriving from a form has no answer yet; indexing it
+    would put questions in a store meant for answers.
+
+    Labels are inferred from the ticket when the console does not pass them, so
+    the new precedent carries the same queue/type metadata as the KB rows it
+    sits beside and the queue filter keeps working.
+
+    Returns {"ticket_id": "LIVE-00001", "indexed": True, "live_count": n}.
+    """
+    from . import retrieve
+
+    resolution = (resolution or "").strip()
+    if not resolution:
+        raise ValueError("resolution text is empty — nothing to learn from")
+    if not (resolved_by or "").strip():
+        raise ValueError("resolved_by is required: precedents must trace to a person")
+
+    if queue is None or type_ is None or language is None:
+        text = build_text(subject, body)
+        qvec = None
+        if STAGES["embed"]:
+            from . import embed
+            qvec = embed.encode([text], is_query=True)[0]
+        if qvec is not None and STAGES["classify"] and config.HEADS_PATH.exists():
+            from . import classify
+            preds = classify.predict(qvec, text)
+        else:
+            preds = _stub_predictions()
+        queue = queue if queue is not None else preds["queue"].label
+        type_ = type_ if type_ is not None else preds["type"].label
+        language = language if language is not None else preds["language"].label
+
+    ticket_id = retrieve.add_precedent(subject=subject, body=body, answer=resolution,
+                                       language=language, queue=queue, type_=type_,
+                                       resolved_by=resolved_by)
+    return {"ticket_id": ticket_id, "indexed": True, "live_count": retrieve.live_count()}

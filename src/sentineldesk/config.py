@@ -111,6 +111,7 @@ MIN_CONFIDENCE = {
     "priority": 0.0,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
 }
 
+
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [
     r"\brefund\b", r"\berstattung\b", r"\brückerstattung\b",
