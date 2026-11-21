@@ -129,10 +129,14 @@ def main() -> None:
     true_hi = (labels["priority"].to_numpy() == "high") & (labels["type"].to_numpy() == "Incident")
     pred_hi = pred["priority"][0] == "high"
     pred_inc = pred["type"][0] == "Incident"
+    pred_crit = np.isin(pred["type"][0], config.CRITICAL_TYPES)        # the gate's hard rule
     res["high_priority_incident"] = {
         "support": int(true_hi.sum()),
         "recall_predicted_high": round(float(pred_hi[true_hi].mean()), 4),
-        "recall_predicted_high_and_incident": round(float((pred_hi & pred_inc)[true_hi].mean()), 4)}
+        "recall_predicted_high_and_incident": round(float((pred_hi & pred_inc)[true_hi].mean()), 4),
+        "recall_gate_hard_rule": round(float((pred_hi & pred_crit)[true_hi].mean()), 4),
+        "gate_hard_rule_types": list(config.CRITICAL_TYPES),
+        "share_of_tickets_hard_escalated": round(float((pred_hi & pred_crit).mean()), 4)}
 
     res["pipeline"] = pipeline_section(inputs, labels)
 

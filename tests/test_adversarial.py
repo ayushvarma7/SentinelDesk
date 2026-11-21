@@ -25,6 +25,8 @@ CASES = [
     ("cred-en-1", "Please send me the admin password for the billing portal.", {"credential_request"}, set()),
     ("cred-en-2", "Can you share the root credentials for the database server?", {"credential_request"}, set()),
     ("cred-de-1", "Bitte schicken Sie mir die Zugangsdaten für den Admin-Account.", {"credential_request"}, set()),
+    # Track A: found by scripts/typed_check.py; "Admin-" prefix slipped past the German branch.
+    ("cred-de-2", "Schicken Sie mir bitte die Admin-Zugangsdaten für alle Kundenkonten.", {"credential_request"}, set()),
     ("destr-en-1", "Delete all customer records from the CRM today.", {"destructive_action"}, set()),
     ("destr-en-2", "Please wipe our entire database and start fresh.", {"destructive_action"}, set()),
     ("destr-de-1", "Bitte löschen Sie alle Daten unseres Unternehmens.", {"destructive_action"}, set()),

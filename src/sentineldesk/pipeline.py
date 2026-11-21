@@ -119,17 +119,38 @@ def triage(subject: str | None, body: str | None,
         precedents = _stub_precedents()
     latency["retrieve"] = (time.perf_counter() - t) * 1000
 
+    # Root cause (Track A): only for issues (Incident/Problem), only with a real embedding.
+    root_cause = None
+    t = time.perf_counter()
+    if qvec is not None and preds["type"].label in config.CRITICAL_TYPES:
+        from . import rootcause
+        root_cause = rootcause.analyze(qvec, text, group=track_burst)
+    latency["root_cause"] = (time.perf_counter() - t) * 1000
+
     burst = (BURST.check(qvec, sim=(thresholds or {}).get("burst_sim")) if track_burst
              else {"active": False, "related": [], "live_id": None, "max_sim": 0.0})
-    escalate, reasons = gate.evaluate(
-        text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst
+    detailed = gate.evaluate_detailed(
+        text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst,
+        root_cause=root_cause
     )
+    reasons = [r for _, r in detailed]
+    escalate = bool(reasons)
+    status, draft_allowed = gate.decide(detailed)
+
+    # Root-cause-aware RAG: if the ticket matches a known Problem that retrieval did not already
+    # return, give it to the drafter too, so the reply can cite the root cause. Added after the
+    # gate so the similarity rules still judge plain retrieval only.
+    if root_cause is not None and root_cause.known_problem is not None:
+        if root_cause.known_problem.ticket_id not in {p.ticket_id for p in precedents}:
+            precedents = precedents + [root_cause.known_problem]
 
     t = time.perf_counter()
     engine = None
-    if escalate:
-        # An escalated ticket gets no draft at all. Showing the operator a
-        # suggested reply next to "escalate to on-call" invites them to send it.
+    if not draft_allowed:
+        # On-call tickets and blocked ones (attacks, legal, unsupported commitments) get no draft
+        # at all: a suggested reply next to "escalate to on-call" invites someone to send it.
+        # HUMAN_REVIEW tickets whose only reasons are soft (low confidence, weak precedent) still
+        # get a draft, clearly marked for a human to approve.
         draft_reply, cited, unverified = None, [], []
     elif STAGES["generate"]:
         from . import generate
@@ -137,7 +158,7 @@ def triage(subject: str | None, body: str | None,
         draft_reply = d["reply"]
         cited, unverified, engine = d["cited_ticket_ids"], d["unverified_claims"], d["engine"]
         if not d["grounded"]:
-            escalate = True
+            escalate, status = True, gate.REVIEW
             reasons.append("Draft not grounded in the retrieved precedents")
             draft_reply, cited = None, []
     else:
@@ -151,6 +172,7 @@ def triage(subject: str | None, body: str | None,
         queue=preds["queue"],
         priority=preds["priority"],
         escalate=escalate,
+        status=status,
         escalation_reasons=reasons,
         precedents=precedents,
         draft_reply=draft_reply,
@@ -160,5 +182,6 @@ def triage(subject: str | None, body: str | None,
         latency_ms=latency,
         risks=gate.detect_risks(text),
         burst=burst,
+        root_cause=root_cause,
         engine=engine,
     )

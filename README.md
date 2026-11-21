@@ -21,6 +21,7 @@ src/sentineldesk/        the package (import with PYTHONPATH=src)
   data.py, text.py       data access (leakage-safe) and build_text()
   embed.py               e5 encoder with query:/passage: prefixes          [Track B]
   classify.py            triage heads                                       [Track A, done]
+  rootcause.py           ITIL root-cause grouping + known Problem/Change    [Track A, done]
   retrieve.py            KB index + search                                  [Track B, todo]
   generate.py            grounded draft + citation verification             [Track C, todo]
   gate.py, pii.py        escalation rules + risk regexes, PII masking with dataset tokens  [P3, done]
@@ -32,6 +33,7 @@ scripts/
   gate_sweep.py          tunes gate thresholds on the KB validation slice                [P3]
   attack_table.py        25 attacks + burst scenario through the real pipeline           [P3]
 tests/test_contract.py   edge cases that must never crash
+tests/test_rootcause.py  root-cause grouping and KB linking
 tests/test_gate.py       pure gate / PII / burst tests                                   [P3]
 tests/test_adversarial.py  25 adversarial tickets (EN + DE)                              [P3]
 notebooks/01_eda.ipynb   EDA (KB split only)
@@ -61,6 +63,7 @@ PYTHONPATH=src python scripts/attack_table.py      # -> reports/attack_table.md
 | Classify | live: frozen model, metrics below |
 | Retrieve | live: exact cosine over the e5 passage index, cross-lingual slot, live precedent store |
 | Generate | live: Gemini with citation/figure verification; extractive fallback without a key |
+| Root cause | live: groups similar live issues (suggests a Problem at 3+), links known KB Problems/Changes |
 
 ## Triage model
 
@@ -82,7 +85,8 @@ PYTHONPATH=src python scripts/attack_table.py      # -> reports/attack_table.md
 | ECE type / queue / priority / language | 0.050 / 0.144 / 0.039 / n/a | 0.028 / 0.012 / 0.082 / 0.003 |
 | High-priority Incident recall: predicted high (n=995) | 0.8563 | 0.8523 |
 | High-priority Incident recall: predicted high **and** Incident | 0.7658 | **0.7729** |
-| High-priority Incident recall: escalated by gate | pending (needs retrieval + generation) | |
+| High-priority Incident recall: gate hard rule (high + Incident **or Problem**) | n/a | **0.8503** (escalates 34% of tickets) |
+| High-priority Incident recall: full gate | pending (needs retrieval + generation) | |
 | Latency p50 / p95 | pending | |
 
 Priority ECE rises because the recall-oriented threshold labels tickets with P(high) as low as 0.25 as `high`.
@@ -95,7 +99,7 @@ Deterministic rules, no LLM in the decision path. Every escalation reason is a s
 | Rule | Action |
 |---|---|
 | Prompt injection, credential request, destructive bulk action, legal threat (EN + DE regexes) | Always escalate; injections never reach the LLM |
-| High priority + Incident | Escalate to on-call |
+| High priority + Incident **or Problem** (`CRITICAL_TYPES`, Track A) | Escalate to on-call |
 | 3+ similar tickets within 30 min (multilingual, `BURST_SIM=0.86`) | Major-incident banner + escalate |
 | Outage words + urgency words (e.g. "keeps dropping" + "immediately") | Escalate to on-call |
 | Any head below its confidence floor (type 0.75, queue 0.50, priority 0.70) | Human review |
@@ -113,6 +117,31 @@ tickets).
 
 PII is masked with the dataset's own tokens (`<email>`, `<tel_num>`, `<acc_num>`) before any external call.
 Attack table: `reports/attack_table.md` (26/26).
+
+The sweep numbers above were measured with the Incident-only hard rule; including Problem escalates more (see Root-cause grouping below).
+
+## Root-cause grouping (ITIL)
+
+Support work follows the ITIL model: a **Request** asks for something ("I need a laptop"), an **Incident** reports something
+broken, and many Incidents share one **Problem** (the root cause), which is fixed by **Changes**.
+`src/sentineldesk/rootcause.py` uses this model in three ways:
+
+- **Critical rule covers Problems too.** Incident and Problem differ by relationship, not wording (712 of 760 type errors
+  are Incident ↔ Problem), so the gate's hard rule fires on *high + (Incident or Problem)*. On validation this raises
+  high-priority Incident recall from 0.803 to 0.882, while the share of tickets this rule escalates goes from 26% to 37%.
+  To revert, set `config.CRITICAL_TYPES = ("Incident",)`.
+- **Live grouping.** Each new issue is compared with live issues from the last 30 minutes. Three or more at cosine
+  similarity ≥ 0.89 (just above the 90th percentile of unrelated pairs) escalate with *"Probable shared root cause — raise a
+  Problem record"*. Grouping works across languages: three English Outlook tickets and a German one group together, and
+  an invoice ticket stays out.
+- **Known history, integrated with RAG.** The closest past Problem and Change are found in the same retrieval index the
+  drafter uses (query → passage), shown when similarity is ≥ 0.89 (just above the 99th percentile of unrelated pairs).
+  If retrieval didn't already return that Problem, it's added to the drafter's precedents, so the reply can cite the root
+  cause. On 300 holdout tickets, 92% of issues linked to a known Problem. Hand-typed tickets score lower (about
+  0.86–0.89), so they link less often.
+
+The dataset has no explicit Incident → Problem links, so these thresholds come from similarity distributions, not
+labelled groups. Tests: `PYTHONPATH=src python tests/test_rootcause.py`.
 
 ## Leakage guarantees
 

@@ -29,6 +29,19 @@ class Precedent:
 
 
 @dataclass
+class RootCause:
+    """ITIL grouping: many Incidents share one Problem (root cause); Changes fix Problems."""
+    group_ticket_ids: list[str]            # live issues (incl. this one) that look like the same root cause
+    suggest_problem: bool                  # group reached config.ROOT_CAUSE_MIN_GROUP
+    known_problem: Precedent | None = None # closest historical Problem ticket in the KB
+    known_change: Precedent | None = None  # closest historical Change ticket in the KB
+
+    @property
+    def group_size(self) -> int:
+        return len(self.group_ticket_ids)
+
+
+@dataclass
 class TriageResult:
     """Everything the console renders for one incoming ticket."""
     language: str
@@ -48,9 +61,15 @@ class TriageResult:
     masked_pii: dict[str, int]             # {"email": 2, "ip": 1}
     latency_ms: dict[str, float]           # embed / classify / retrieve / generate / total
 
+    # Three-tier outcome (gate.decide): "AUTO_DRAFT_READY" | "HUMAN_REVIEW" | "ESCALATE_ONCALL".
+    # HUMAN_REVIEW may carry a draft for a human to approve (soft reasons only). escalate stays
+    # True for both HUMAN_REVIEW and ESCALATE_ONCALL, so older callers keep their meaning.
+    status: str = ""
+
     # Added by P3 (defaults keep every existing constructor call valid).
     risks: list[str] = field(default_factory=list)       # gate.detect_risks(): "prompt_injection", ...
     burst: dict = field(default_factory=dict)            # {"active", "related", "live_id", "max_sim"}
+    root_cause: RootCause | None = None    # set for Incident/Problem tickets (Track A); optional, so old callers still work
 
     # Which path produced the draft: the model name, "extractive-fallback", or
     # None when the ticket was escalated and no draft was written.

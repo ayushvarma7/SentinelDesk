@@ -3,19 +3,19 @@
   "high_threshold": 0.25,
   "C": 32.0,
   "type": {
-    "macro_f1": 0.8758,
-    "accuracy": 0.8671,
-    "ece": 0.0279
+    "macro_f1": 0.8777,
+    "accuracy": 0.8692,
+    "ece": 0.0276
   },
   "queue": {
-    "macro_f1": 0.6121,
-    "accuracy": 0.6137,
-    "ece": 0.0197
+    "macro_f1": 0.6109,
+    "accuracy": 0.6142,
+    "ece": 0.0123
   },
   "priority": {
-    "macro_f1": 0.622,
-    "accuracy": 0.6392,
-    "ece": 0.0786
+    "macro_f1": 0.6195,
+    "accuracy": 0.6366,
+    "ece": 0.0815
   },
   "language": {
     "macro_f1": 0.9666,
@@ -24,19 +24,28 @@
   },
   "high_priority_incident": {
     "support": 995,
-    "recall_predicted_high": 0.8533,
-    "recall_predicted_high_and_incident": 0.7698
+    "recall_predicted_high": 0.8523,
+    "recall_predicted_high_and_incident": 0.7729,
+    "recall_gate_hard_rule": 0.8503,
+    "gate_hard_rule_types": [
+      "Incident",
+      "Problem"
+    ],
+    "share_of_tickets_hard_escalated": 0.3419
   },
   "pipeline": {
-    "n_sampled": 120,
-    "auto_draft_share": 0.2917,
-    "high_incident_support": 27,
-    "high_incident_escalated_by_gate": 0.9259,
-    "top1_same_queue": 0.6917,
-    "top1_same_queue_auto_drafted": 0.8857,
-    "median_top1_similarity": 0.9415,
-    "cross_lingual_share": 1.0,
-    "latency_ms_p50": 175.0,
-    "latency_ms_p95": 1480.4
+    "n_sampled": 200,
+    "auto_draft_share": 0.395,
+    "high_incident_support": 41,
+    "high_incident_escalated_by_gate": 0.9024,
+    "top1_same_queue": 0.67,
+    "top1_same_queue_auto_drafted": 0.7595,
+    "median_top1_similarity": 0.9385,
+    "cross_lingual_share_forced": 1.0,
+    "cross_lingual_share_unaided": 0.32,
+    "latency_ms_p50_all": 179.6,
+    "latency_ms_p95_all": 1177.2,
+    "latency_ms_p50_drafted": 228.1,
+    "latency_ms_p95_drafted": 1214.1
   }
 }
