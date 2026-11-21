@@ -88,6 +88,7 @@ def test_core_problem_scenario():
     gp, gr, *_ = pairwise(g, lambda a, b: a["group"] == b["group"])
     # Burst (burst.py): an edge whenever a ticket lists an earlier one as related.
     by_id = {r["burst_id"]: i for i, r in enumerate(rows)}
+    by_id.update({r["live_id"]: i for i, r in enumerate(rows) if r["live_id"]})   # banner from root-cause groups
     parent = list(range(len(rows)))
     def find(x):
         while parent[x] != x:
@@ -112,7 +113,7 @@ def test_core_problem_scenario():
     linked = {c: sorted({r["known_problem"] for r in rows if r["core"] == c and r["known_problem"]}) for c in cores}
 
     print(f"\n  grouping (rootcause, {len(g)}/{len(rows)} tickets typed as issues): precision {gp:.2f}  recall {gr:.2f}")
-    print(f"  burst links (burst.py, all tickets):                 precision {bp:.2f}  recall {br:.2f}")
+    print(f"  major-incident banner links:                         precision {bp:.2f}  recall {br:.2f}")
     print(f"  promoted to major incident / shared root cause by 3rd report: {promoted_by_3rd}")
     print(f"  promoted at any point: {promoted_any}")
     print(f"  one-off tickets promoted: {false_alarms or 'none'}")

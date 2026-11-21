@@ -124,11 +124,19 @@ def triage(subject: str | None, body: str | None,
     t = time.perf_counter()
     if qvec is not None and preds["type"].label in config.CRITICAL_TYPES:
         from . import rootcause
-        root_cause = rootcause.analyze(qvec, text, group=track_burst)
+        root_cause = rootcause.analyze(qvec, text, group=track_burst, queue=preds["queue"].label)
     latency["root_cause"] = (time.perf_counter() - t) * 1000
 
     burst = (BURST.check(qvec, sim=(thresholds or {}).get("burst_sim")) if track_burst
              else {"active": False, "related": [], "live_id": None, "max_sim": 0.0})
+    if config.MAJOR_INCIDENT_SOURCE == "root_cause" and track_burst:
+        # The banner follows the root-cause group (issues only, queue-aware linking), not P3's
+        # flat-cosine trigger, which fired on unrelated tickets in tests/test_major_incident.py.
+        # P3's detector still records every ticket and reports max_sim for the console.
+        group = root_cause.group_ticket_ids if root_cause is not None else []
+        active = root_cause is not None and root_cause.suggest_problem
+        burst = {**burst, "active": active, "related": group[:-1] if active else [],
+                 "source": "root_cause"}
     detailed = gate.evaluate_detailed(
         text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst,
         root_cause=root_cause

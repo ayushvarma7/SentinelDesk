@@ -42,7 +42,19 @@ CRITICAL_TYPES = ("Incident", "Problem")
 CRITICAL_SCORE_MIN = 0.20
 # Similarity (e5 query vectors) above which two issues are treated as the same root cause.
 # Calibrated on KB issue pairs from different queues with no shared tag: p90=0.891, p99=0.917.
-ROOT_CAUSE_GROUP_SIM = 0.89
+# 0.88: tests/test_major_incident.py (4 core problems EN+DE, 5 one-offs) gives grouping and
+# banner precision 1.00 with no premature banner, and P3's attack-table burst case passes
+# (its German VPN report scores 0.884). 0.885+ misses that report; P3's flat 0.86 burst had
+# banner precision 0.16 and raised 4 banners before a 3rd report of the same problem.
+ROOT_CAUSE_GROUP_SIM = 0.88
+# Optional lower bar when both issues share a predicted queue. DISABLED (None): it merged Outlook,
+# VPN and printer outages into one group, because the classifier puts all three in the same IT queue
+# and single linkage chains them. (A KB check had looked fine only because it defined "unrelated"
+# as different queues, exactly where this rule never applies.)
+ROOT_CAUSE_GROUP_SIM_SAME_QUEUE = None
+# What raises the major-incident banner: "root_cause" (grouping above, 3+ issues) or "burst"
+# (P3's burst.py: direct cosine >= BURST_SIM to 2 earlier tickets of any type).
+MAJOR_INCIDENT_SOURCE = "root_cause"
 ROOT_CAUSE_MIN_GROUP = 3             # this many similar live issues -> suggest raising a Problem
 ROOT_CAUSE_WINDOW_MIN = 30           # live issues older than this drop out of grouping
 ROOT_CAUSE_MIN_WORDS = 3             # too-short tickets ("help", emoji) are never grouped
