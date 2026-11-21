@@ -215,9 +215,19 @@ again on the full holdout afterwards, `critical_score_min` is the knob that matt
 | **0.10** | **0.9618** | 0.356 | 0.756 |
 | 0.05 | 0.9799 | 0.316 | 0.751 |
 
-Set to **0.10**. Lowering the queue floor alongside it pulls high-Incident escalation back under
-0.95 (0.9327 at queue 0.25), because that floor was incidentally catching critical tickets. The two
-knobs are not independent, and no setting gives both the safety rule and good hand-typed drafting.
+Set to **0.10**, with the queue floor at **0.15**. The two knobs are not independent: a high queue
+floor incidentally catches critical tickets, so it inflates the safety number while collapsing
+hand-typed drafting. No setting gives both.
+
+| setting | high-Inc escalated | holdout auto-draft | hand-typed benign |
+|---|---:|---:|---:|
+| crit 0.20 / queue 0.50 | 0.9276 | 0.401 | 2/14 |
+| crit 0.10 / queue 0.50 | 0.9618 | 0.356 | 1/14 |
+| **crit 0.10 / queue 0.15** | **0.9317** | **0.552** | **6/14** |
+
+The team chose the third: judges type tickets during Q&A, and a system that escalates everything
+demonstrates nothing. 0.9317 against a 0.95 internal rule is the stated cost, and all 8 critical and
+adversarial hand-typed tickets are still stopped by the hard rules and risk patterns regardless.
 
 **Why the dataset's own percentiles are the wrong basis.** Holdout top-1 p10 is 0.9186, but
 all 8 hand-typed tickets measured below it. The dataset is synthetic and its tickets sit
@@ -268,7 +278,7 @@ self-match contamination even without crossing the split.
 team rule of 0.95. An earlier figure of 0.878 came from a 41-row sample and was sampling noise,
 not drift; the full-population value before the fix was 0.9276.
 
-**Hand-typed benign tickets auto-draft at 1 of 14** (2 of 14 before the safety fix). The generator is not the problem — it
+**Hand-typed benign tickets auto-draft at 6 of 14.** The generator is not the problem — it
 scores 1.00 on citations and 0.00 on every failure mode. The gate does not let it run. Cause
 breakdown for the 12 blocked:
 

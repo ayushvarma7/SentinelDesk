@@ -92,7 +92,10 @@ MIN_MEAN_TOP3_SIMILARITY = 0.8450
 # 97.0% of high Incidents escalated, auto-drafted queue accuracy 0.815 vs 0.609 overall.
 MIN_CONFIDENCE = {
     "type": 0.0,
-    "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
+    "queue": 0.15,      # demo-first. At 0.50 this floor incidentally caught critical tickets,
+                        # so high-Inc escalation reads higher (0.9618) but hand-typed benign
+                        # drafting collapses to 1/14. At 0.15: 0.9317 high-Inc, 7/14 at the gate,
+                        # holdout auto-draft 0.401 -> 0.552. CRITICAL_SCORE_MIN carries safety.
     "priority": 0.0,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
 }
 
