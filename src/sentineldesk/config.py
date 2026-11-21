@@ -1,0 +1,60 @@
+"""Single source of truth for paths, model names and thresholds.
+
+Announce changes to the team — every track imports this.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+DATA_RAW = ROOT / "data" / "raw"
+DATA_PROCESSED = ROOT / "data" / "processed"
+ARTIFACTS = ROOT / "artifacts"
+
+# --- models -----------------------------------------------------------------
+# e5 requires the "query: " / "passage: " prefixes; skipping them costs real accuracy.
+EMBED_MODEL = "intfloat/multilingual-e5-small"
+EMBED_DIM = 384
+QUERY_PREFIX = "query: "
+PASSAGE_PREFIX = "passage: "
+
+LLM_MODEL = "claude-haiku-5-5"      # switch to claude-sonnet-5-5 if German quality disappoints
+LLM_MAX_TOKENS = 1024
+
+# --- retrieval --------------------------------------------------------------
+TOP_K = 5
+DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected
+
+# --- escalation gate --------------------------------------------------------
+# EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is
+# already the top of the 15-25% target band. Keep the soft thresholds tight or the
+# overall escalation rate balloons past 40% and the copilot looks useless.
+# Tune these in scripts/evaluate.py, do not guess them.
+MIN_CONFIDENCE = {
+    "type": 0.50,
+    "queue": 0.45,      # 10 classes at 21x imbalance, so expect lower confidence here
+    "priority": 0.55,   # EDA says priority is weakly predictable; this may need lowering
+}
+MIN_TOP1_SIMILARITY = 0.72
+MIN_MEAN_TOP3_SIMILARITY = 0.65
+
+# Requests that imply a commitment we cannot make without precedent.
+UNSUPPORTED_ACTION_PATTERNS = [
+    r"\brefund\b", r"\berstattung\b", r"\brückerstattung\b",
+    r"\bcancel (my )?(contract|subscription)\b", r"\bkündig",
+    r"\bsla\b", r"\bcompensation\b", r"\bentschädigung\b",
+    r"\bchargeback\b", r"\blegal\b", r"\brechtlich\b",
+    r"\bgdpr\b", r"\bdsgvo\b", r"\bdelete my (data|account)\b",
+    r"\bwire transfer\b", r"\büberweisung\b",
+]
+
+PROMPT_INJECTION_PATTERNS = [
+    r"ignore (all |your |the )?(previous|prior|above) instructions",
+    r"disregard (all |your |the )?(previous|prior|above)",
+    r"you are now\b", r"system prompt", r"reveal your (prompt|instructions)",
+]
+
+# --- data -------------------------------------------------------------------
+RANDOM_SEED = 42
+TRAIN_FRACTION = 0.8
+TARGETS = ["type", "queue", "priority", "language"]
