@@ -4,7 +4,8 @@ import pandas as pd
 import streamlit as st
 
 from sentinel_ui.common import (DEMO_USERS, ON_CALL, REVIEW, SERVICES, T, add_ticket, badge, img_uri,
-                                inject_css, load_live, run_triage, ticket_priority_label, ticket_type)
+                                inject_css, load_live, major_incidents, run_triage, ticket_priority_label,
+                                ticket_type)
 
 inject_css()
 st.session_state.setdefault("lang", "en")
@@ -26,24 +27,23 @@ def lang_switch(col):
         st.session_state.lang = pick
 
 
-def hero(kicker: str, title: str, text: str, photo: str | None, extra: str = ""):
+def hero(kicker: str, title: str, text: str, photo: str | None, extra: str = "", cls: str = ""):
     layer = (f'<div class="photo" style="background-image:url({photo})"></div><div class="shade"></div>'
              if photo else '<div class="bg"></div><div class="grid"></div><div class="scan"></div>')
-    st.markdown(f'<div class="hero">{layer}<div class="in"><div class="k">{kicker}</div>'
+    st.markdown(f'<div class="hero {cls}">{layer}<div class="in"><div class="k">{kicker}</div>'
                 f'<div class="h">{title}</div><div class="p">{text}</div>{extra}</div></div>',
                 unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------ sign-in
 if not st.session_state.user:
-    top = st.columns([5, 1.4])
+    top = st.columns([5, 2], vertical_alignment="center")
     lang_switch(top[1])
     t = T[st.session_state.lang]
     left, right = st.columns([1.35, 1], gap="large")
     with left:
-        hero(t["portal"], t["side_h"], t["side_p"], img_uri("login.jpg"))
+        hero(t["portal"], t["side_h"], t["side_p"], img_uri("login.jpg"), cls="login")
     with right:
-        st.markdown("<div style='height:.6rem'></div>", unsafe_allow_html=True)
         with st.form("login"):
             st.markdown(f"#### {t['login']}")
             email = st.text_input(t["email"], placeholder="husky@northeastern.edu")
@@ -55,12 +55,13 @@ if not st.session_state.user:
                     st.rerun()
                 else:
                     st.error(t["bad_login"])
-        st.caption("Demo accounts: nima@northeastern.edu / husky2026 · demo@northeastern.edu / demo")
+        st.caption("Demo accounts: `varma.ay@northeastern.edu` / `ayush` · `gupta.kunal@northeastern.edu` / "
+                   "`kunal` · `demo@northeastern.edu` / `demo`")
     st.stop()
 
 # ------------------------------------------------------------------ signed in
 user = st.session_state.user
-top = st.columns([5, 1.4, 0.8, 0.5])
+top = st.columns([5, 2, 1, 0.45], vertical_alignment="center")
 lang_switch(top[1])
 t = T[st.session_state.lang]
 if top[2].button(t["signout"], use_container_width=True):
@@ -74,7 +75,7 @@ live = load_live()
 cutoff = datetime.now() - timedelta(hours=1)
 recent = [x for x in live if datetime.strptime(x["opened"], "%Y-%m-%d %H:%M") >= cutoff]
 recent_urgent = [x for x in recent if ticket_priority_label(x) == "high" and ticket_type(x) == "Incident"]
-outage = len(recent_urgent) >= 3 or any((x["triage"].get("burst") or {}).get("active") for x in recent)
+outage = len(recent_urgent) >= 3 or any(i["active"] for i in major_incidents(live))
 status_html = (f'<div style="margin-top:1.2rem;display:inline-flex;align-items:center;gap:.55rem;'
                f'background:rgba(255,255,255,.1);padding:.45rem .85rem;border-radius:999px;font-size:.92rem">'
                f'<span style="width:9px;height:9px;border-radius:50%;background:{"#F87171" if outage else "#34D399"}">'
@@ -86,8 +87,11 @@ st.markdown(f"<div style='height:1rem'></div><div class='ph'><div><div class='t'
             unsafe_allow_html=True)
 tiles = st.columns(6)
 for col, (name, ic) in zip(tiles, TILE_ICONS.items()):
-    if col.button(name, icon=ic, use_container_width=True, key=f"tile_{name}"):
+    selected = st.session_state.svc == name
+    if col.button(name, icon=ic, use_container_width=True, key=f"tile_{name}",
+                  type="primary" if selected else "secondary"):
         st.session_state.svc = name
+        st.rerun()                      # redraw so the picked tile is highlighted
 
 
 def submit(kind: str, subject: str, body: str, extra: dict):

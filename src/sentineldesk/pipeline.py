@@ -75,11 +75,14 @@ def _stub_precedents() -> list[Precedent]:
 
 
 def triage(subject: str | None, body: str | None,
-           thresholds: dict | None = None, track_burst: bool = True) -> TriageResult:
+           thresholds: dict | None = None, track_burst: bool = True,
+           received_at: float | None = None) -> TriageResult:
     """Triage one ticket. Safe on null subject, null body, and arbitrary length.
 
     track_burst=False keeps the ticket out of the burst detector. Evaluation scripts pass it so
     their own batch of (often similar) tickets cannot raise a false major-incident banner.
+    received_at (epoch seconds) is when the ticket arrived; it defaults to now. Replaying history (the
+    demo seed) passes it so the burst and root-cause windows use the ticket's own time.
     """
     t0 = time.perf_counter()
     latency: dict[str, float] = {}
@@ -124,10 +127,10 @@ def triage(subject: str | None, body: str | None,
     t = time.perf_counter()
     if qvec is not None and preds["type"].label in config.CRITICAL_TYPES:
         from . import rootcause
-        root_cause = rootcause.analyze(qvec, text, group=track_burst)
+        root_cause = rootcause.analyze(qvec, text, now=received_at, group=track_burst)
     latency["root_cause"] = (time.perf_counter() - t) * 1000
 
-    burst = (BURST.check(qvec, sim=(thresholds or {}).get("burst_sim")) if track_burst
+    burst = (BURST.check(qvec, now=received_at, sim=(thresholds or {}).get("burst_sim")) if track_burst
              else {"active": False, "related": [], "live_id": None, "max_sim": 0.0})
     detailed = gate.evaluate_detailed(
         text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst,
