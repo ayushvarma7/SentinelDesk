@@ -78,7 +78,7 @@ KB_META_PATH = ARTIFACTS / "kb_meta.parquet"         # same row order as KB_EMB_
 
 # Live store: precedents added during a session (see retrieve.add_precedent).
 # Separate from the frozen index on purpose — evaluation passes include_live=False.
-LIVE_DIR = ARTIFACTS / "live"
+LIVE_DIR = Path(os.getenv("SD_LIVE_DIR", str(ARTIFACTS / "live")))   # SD_LIVE_DIR: isolate tests
 LIVE_EMB_PATH = LIVE_DIR / "live_embeddings.npy"
 LIVE_META_PATH = LIVE_DIR / "live_meta.parquet"
 TOP_K = 5

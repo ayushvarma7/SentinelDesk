@@ -29,3 +29,7 @@ matplotlib==3.9.3
 seaborn==0.13.2
 jupyter==1.1.1
 langdetect==1.0.9
+
+# API for the React console (api/main.py)
+fastapi
+uvicorn

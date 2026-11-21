@@ -76,7 +76,7 @@ def _stub_precedents() -> list[Precedent]:
 
 def triage(subject: str | None, body: str | None,
            thresholds: dict | None = None, track_burst: bool = True,
-           received_at: float | None = None) -> TriageResult:
+           received_at: float | None = None, record: bool | None = None) -> TriageResult:
     """Triage one ticket. Safe on null subject, null body, and arbitrary length.
 
     track_burst=False keeps the ticket out of the burst detector. Evaluation scripts pass it so
@@ -201,7 +201,9 @@ def triage(subject: str | None, body: str | None,
     # Track A: log every LIVE triage and match-or-add its problem in the database (store.py).
     # Evaluation passes track_burst=False and is never recorded. Attacks and empty tickets are
     # logged but not registered as problems. A database error must never break triage.
-    if track_burst and config.DB_ENABLED:
+    # record=None -> record live tickets only; record=False lets a caller (e.g. demo seeding) triage
+    # live without writing to the problem database.
+    if (track_burst if record is None else record) and config.DB_ENABLED:
         try:
             from . import store
             hard = set(result.risks) & set(gate.HARD_RISKS)
