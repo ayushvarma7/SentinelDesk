@@ -21,6 +21,16 @@ PASSAGE_PREFIX = "passage: "
 LLM_MODEL = "claude-haiku-5-5"      # switch to claude-sonnet-5-5 if German quality disappoints
 LLM_MAX_TOKENS = 1024
 
+# --- triage classifier (Track A) ------------------------------------------------
+# Frozen on the KB validation slice (docs/p1_workdone.md): word TF-IDF || e5 query embedding.
+HEADS_PATH = ARTIFACTS / "heads.joblib"
+KB_QUERY_EMB_PATH = ARTIFACTS / "kb_query_embeddings.npy"   # KB encoded with is_query=True, for the classifier
+CLASSIFIER_C = 32.0
+CLASSIFIER_EMB_WEIGHT = 1.0
+HIGH_PRIORITY_TARGET_RECALL = 0.80   # P(high) threshold is the highest one reaching this on validation
+HIGH_PRIORITY_THRESHOLD = 0.25       # value tuned by scripts/train_classifier.py (also stored in heads.joblib)
+VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).permutation(len(kb)); gate tuning reuses it
+
 # --- retrieval --------------------------------------------------------------
 TOP_K = 5
 DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected
