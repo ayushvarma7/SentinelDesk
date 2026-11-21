@@ -18,25 +18,60 @@ EMBED_DIM = 384
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
 
-LLM_MODEL = "claude-haiku-5-5"      # switch to claude-sonnet-5-5 if German quality disappoints
+LLM_MODEL = "gemini-3.8-flash"   # P2.1: 2.5-flash is closed to new keys (404)
 LLM_MAX_TOKENS = 1024
 
-# --- retrieval --------------------------------------------------------------
+# --- triage classifier (Track A) ------------------------------------------------
+# Frozen on the KB validation slice (docs/p1_workdone.md): word TF-IDF || e5 query embedding.
+HEADS_PATH = ARTIFACTS / "heads.joblib"
+KB_QUERY_EMB_PATH = ARTIFACTS / "kb_query_embeddings.npy"   # KB encoded with is_query=True, for the classifier
+CLASSIFIER_C = 32.0
+CLASSIFIER_EMB_WEIGHT = 1.0
+HIGH_PRIORITY_TARGET_RECALL = 0.80   # P(high) threshold is the highest one reaching this on validation
+HIGH_PRIORITY_THRESHOLD = 0.25       # value tuned by scripts/train_classifier.py (also stored in heads.joblib)
+VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).permutation(len(kb)); gate tuning reuses it
+
+# --- retrieval (Track B / P2) -----------------------------------------------
+KB_EMB_PATH = ARTIFACTS / "kb_embeddings.npy"        # KB encoded with is_query=False, for retrieval
+KB_META_PATH = ARTIFACTS / "kb_meta.parquet"         # same row order as KB_EMB_PATH
+
+# Live store: precedents added during a session (see retrieve.add_precedent).
+# Separate from the frozen index on purpose — evaluation passes include_live=False.
+LIVE_DIR = ARTIFACTS / "live"
+LIVE_EMB_PATH = LIVE_DIR / "live_embeddings.npy"
+LIVE_META_PATH = LIVE_DIR / "live_meta.parquet"
 TOP_K = 5
 DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected
+
+# Places in the top-k reserved for a precedent in the OTHER language. e5 does
+# not bridge languages on its own: by DETECTED language only 1-3% of hits cross
+# over. 0 disables; evaluation passes 0 so metrics measure unaided retrieval.
+CROSS_LINGUAL_SLOTS = 1
 
 # --- escalation gate --------------------------------------------------------
 # EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is
 # already the top of the 15-25% target band. Keep the soft thresholds tight or the
 # overall escalation rate balloons past 40% and the copilot looks useless.
-# Tune these in scripts/evaluate.py, do not guess them.
+# Owned by P3. Two sources, on purpose (docs/p3_workdone.md §3):
+#
+# Similarity floors: calibrated by P2 on HAND-TYPED tickets, not KB percentiles. The dataset is
+# synthetic and its own tickets sit unusually close to the KB (validation top-1 p25 0.918), while
+# hand-typed text scores: in-domain 0.845-0.906 | off-domain 0.855-0.864 | gibberish 0.833-0.851 |
+# off-topic (a recipe) 0.823. A KB-derived floor escalates 100% of judge input, so these are only
+# a weak off-topic filter (they fire on 0.1% of validation tickets).
+MIN_TOP1_SIMILARITY = 0.8650
+MIN_MEAN_TOP3_SIMILARITY = 0.8450
+#
+# Confidence floors: chosen by scripts/gate_sweep.py on the 10% KB validation slice (never the
+# holdout), through the real retrieve.search(), under the fixed similarity floors above, with a
+# rule fixed before the sweep: >=95% of high-priority Incidents escalated, >=25% auto-drafted, then
+# max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 25.2% auto-drafted,
+# 97.0% of high Incidents escalated, auto-drafted queue accuracy 0.815 vs 0.609 overall.
 MIN_CONFIDENCE = {
-    "type": 0.50,
-    "queue": 0.45,      # 10 classes at 21x imbalance, so expect lower confidence here
-    "priority": 0.55,   # EDA says priority is weakly predictable; this may need lowering
+    "type": 0.75,
+    "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
+    "priority": 0.70,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
 }
-MIN_TOP1_SIMILARITY = 0.72
-MIN_MEAN_TOP3_SIMILARITY = 0.65
 
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [
@@ -48,6 +83,21 @@ UNSUPPORTED_ACTION_PATTERNS = [
     r"\bwire transfer\b", r"\büberweisung\b",
 ]
 
+# --- safety gate (P3) ------------------------------------------------------
+# Risk regexes live in gate.RISK_PATTERNS (owned by P3, tested by tests/test_adversarial.py).
+MIN_LETTERS = 3                      # fewer letters than this (emoji only, bare URL) -> human
+
+# Burst / major-incident detector (burst.py). A ticket is part of a burst when at least
+# BURST_MIN_COUNT tickets (itself included) within BURST_WINDOW_S have pairwise cosine
+# >= BURST_SIM to it. e5 query-vs-query cosines sit in a narrow high band, so this is high.
+# Tuned by scripts/attack_table.py: the German VPN ticket scores 0.884 against the English
+# ones and the invoice ticket 0.795, so any value in (0.795, 0.88] works; 0.86 keeps margin
+# on both sides (0.90 missed the cross-lingual ticket).
+BURST_SIM = 0.86
+BURST_MIN_COUNT = 3
+BURST_WINDOW_S = 30 * 60
+
+# Legacy list, kept for anything that still imports it; the gate uses gate.RISK_PATTERNS.
 PROMPT_INJECTION_PATTERNS = [
     r"ignore (all |your |the )?(previous|prior|above) instructions",
     r"disregard (all |your |the )?(previous|prior|above)",
