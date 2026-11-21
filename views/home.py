@@ -25,11 +25,11 @@ stat_strip([(len(kb), "", "resolved tickets in the knowledge base"),
             (hi_inc, "%", "of tickets escalated straight to on-call")])
 
 cards = [("spark", "Live triage", "Paste any ticket and see type, queue, priority, confidence, latency, the gate's "
-          "decision, cited past tickets and the draft.", "triage", "Open live triage"),
+          "decision, cited past tickets and the draft.", "triage", "Open triage"),
          ("portal", "Customer portal", "Students and staff sign in, report incidents or request help, and track every ticket.",
-          "customer", "Open customer portal"),
+          "customer", "Open portal"),
          ("table", "Organisation", "A ServiceNow-style queue with predicted team, priority, SLA timers and an AI assistant.",
-          "agent", "Open organisation console"),
+          "agent", "Open console"),
          ("chart", "Dashboard", "Volume, urgency and routing patterns, plus model accuracy on unseen tickets.",
           "dashboard", "Open dashboard")]
 # One grid, so the three cards always share a height and their buttons line up.

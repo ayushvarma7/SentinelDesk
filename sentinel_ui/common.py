@@ -183,7 +183,7 @@ def inject_css():
         .link-card{display:flex;flex-direction:column}
         .link-card .cd{flex:1}
         .link-card a.go{align-self:flex-start;margin-top:1.1rem;background:var(--nu-red);color:#FFFFFF!important;
-            text-decoration:none!important;font-weight:700;font-size:.92rem;padding:.55rem 1rem;border-radius:6px;
+            text-decoration:none!important;font-weight:700;font-size:.92rem;padding:.55rem 1rem;border-radius:6px;white-space:nowrap;
             transition:background .15s ease}
         .link-card a.go:hover{background:var(--nu-red-dark)}
         .step .n{font-size:.78rem;font-weight:900;color:var(--nu-red);letter-spacing:.1em;text-transform:uppercase}
