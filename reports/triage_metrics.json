@@ -1,0 +1,30 @@
+{
+  "n_holdout": 5718,
+  "high_threshold": 0.25,
+  "C": 32.0,
+  "type": {
+    "macro_f1": 0.8777,
+    "accuracy": 0.8692,
+    "ece": 0.0276
+  },
+  "queue": {
+    "macro_f1": 0.6109,
+    "accuracy": 0.6142,
+    "ece": 0.0123
+  },
+  "priority": {
+    "macro_f1": 0.6195,
+    "accuracy": 0.6366,
+    "ece": 0.0815
+  },
+  "language": {
+    "macro_f1": 0.9666,
+    "accuracy": 0.9675,
+    "ece": 0.0032
+  },
+  "high_priority_incident": {
+    "support": 995,
+    "recall_predicted_high": 0.8523,
+    "recall_predicted_high_and_incident": 0.7729
+  }
+}

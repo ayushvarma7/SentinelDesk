@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import time
 
-from . import gate, pii
+from . import config, gate, pii
 from .text import build_text
 from .schema import Precedent, Prediction, TriageResult
 
 # Flip each to True as that track lands. Keeps the app runnable the whole way.
 STAGES = {
-    "embed": False,
-    "classify": False,
+    "embed": True,       # Track A wired embed.encode (Track B owns the file)
+    "classify": True,    # Track A: falls back to the stub if artifacts/heads.joblib is missing
     "retrieve": False,
     "generate": False,
 }
@@ -54,8 +54,21 @@ def triage(subject: str | None, body: str | None,
     text = build_text(subject, body)
     masked_text, masked_counts = pii.mask(text)
 
+    # Embed once; the same query vector feeds the classifier and (later) retrieval.
+    # Classification runs locally on the unmasked text; masking matters before external LLM calls.
+    qvec = None
     t = time.perf_counter()
-    preds = _stub_predictions()          # TODO Track A + B
+    if STAGES["embed"]:
+        from . import embed
+        qvec = embed.encode([text], is_query=True)[0]
+    latency["embed"] = (time.perf_counter() - t) * 1000
+
+    t = time.perf_counter()
+    if STAGES["classify"] and qvec is not None and config.HEADS_PATH.exists():
+        from . import classify
+        preds = classify.predict(qvec, text)
+    else:
+        preds = _stub_predictions()
     latency["classify"] = (time.perf_counter() - t) * 1000
 
     t = time.perf_counter()
