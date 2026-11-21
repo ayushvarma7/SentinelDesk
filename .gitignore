@@ -7,3 +7,4 @@ artifacts/
 .env
 .DS_Store
 .ipynb_checkpoints/
+data/live_tickets.json
