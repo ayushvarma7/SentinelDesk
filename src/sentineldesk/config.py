@@ -69,20 +69,26 @@ CROSS_LINGUAL_SLOTS = 1
 # EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is
 # already the top of the 15-25% target band. Keep the soft thresholds tight or the
 # overall escalation rate balloons past 40% and the copilot looks useless.
-# Tune these in scripts/evaluate.py, do not guess them.
-MIN_CONFIDENCE = {
-    "type": 0.55,
-    "queue": 0.30,       # 10 classes at 21x imbalance; confidences genuinely sit 0.3-0.5
-    "priority": 0.50,    # recall-tuned P(high)=0.25 means "high" can carry low confidence
-}
-# Calibrated on HAND-TYPED tickets, not holdout percentiles. The holdout p10 is
-# 0.9186, but the dataset is synthetic and its own tickets sit unusually close
-# to the KB: 8/8 hand-written tickets scored below that, so a holdout-derived
-# threshold escalates 100% of judge input. Measured bands with hand-typed text:
-#   in-domain 0.869-0.906 | off-domain 0.855-0.864 | gibberish 0.833
-# The margin is thin (~0.005), so treat similarity as a WEAK signal. P3 to sweep.
+# Owned by P3. Two sources, on purpose (docs/p3_workdone.md §3):
+#
+# Similarity floors: calibrated by P2 on HAND-TYPED tickets, not KB percentiles. The dataset is
+# synthetic and its own tickets sit unusually close to the KB (validation top-1 p25 0.918), while
+# hand-typed text scores: in-domain 0.845-0.906 | off-domain 0.855-0.864 | gibberish 0.833-0.851 |
+# off-topic (a recipe) 0.823. A KB-derived floor escalates 100% of judge input, so these are only
+# a weak off-topic filter (they fire on 0.1% of validation tickets).
 MIN_TOP1_SIMILARITY = 0.8650
-MIN_MEAN_TOP3_SIMILARITY = 0.8450   # hand-typed mean top-3 sits ~0.86-0.87; P3 to sweep
+MIN_MEAN_TOP3_SIMILARITY = 0.8450
+#
+# Confidence floors: chosen by scripts/gate_sweep.py on the 10% KB validation slice (never the
+# holdout), through the real retrieve.search(), under the fixed similarity floors above, with a
+# rule fixed before the sweep: >=95% of high-priority Incidents escalated, >=25% auto-drafted, then
+# max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 25.2% auto-drafted,
+# 97.0% of high Incidents escalated, auto-drafted queue accuracy 0.815 vs 0.609 overall.
+MIN_CONFIDENCE = {
+    "type": 0.75,
+    "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
+    "priority": 0.70,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
+}
 
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [
@@ -94,6 +100,21 @@ UNSUPPORTED_ACTION_PATTERNS = [
     r"\bwire transfer\b", r"\büberweisung\b",
 ]
 
+# --- safety gate (P3) ------------------------------------------------------
+# Risk regexes live in gate.RISK_PATTERNS (owned by P3, tested by tests/test_adversarial.py).
+MIN_LETTERS = 3                      # fewer letters than this (emoji only, bare URL) -> human
+
+# Burst / major-incident detector (burst.py). A ticket is part of a burst when at least
+# BURST_MIN_COUNT tickets (itself included) within BURST_WINDOW_S have pairwise cosine
+# >= BURST_SIM to it. e5 query-vs-query cosines sit in a narrow high band, so this is high.
+# Tuned by scripts/attack_table.py: the German VPN ticket scores 0.884 against the English
+# ones and the invoice ticket 0.795, so any value in (0.795, 0.88] works; 0.86 keeps margin
+# on both sides (0.90 missed the cross-lingual ticket).
+BURST_SIM = 0.86
+BURST_MIN_COUNT = 3
+BURST_WINDOW_S = 30 * 60
+
+# Legacy list, kept for anything that still imports it; the gate uses gate.RISK_PATTERNS.
 PROMPT_INJECTION_PATTERNS = [
     r"ignore (all |your |the )?(previous|prior|above) instructions",
     r"disregard (all |your |the )?(previous|prior|above)",

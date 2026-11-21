@@ -106,10 +106,14 @@ class IncidentGrouper:
 GROUPER = IncidentGrouper()
 
 
-def analyze(qvec: np.ndarray, text: str, now: float | None = None) -> RootCause:
-    """Root-cause view for one Incident/Problem ticket: live group + closest known Problem/Change."""
+def analyze(qvec: np.ndarray, text: str, now: float | None = None, group: bool = True) -> RootCause:
+    """Root-cause view for one Incident/Problem ticket: live group + closest known Problem/Change.
+
+    group=False keeps the ticket out of live grouping (batch evaluation, same as track_burst=False).
+    """
     # too little text ("help", emoji) to say anything about root cause: not grouped
-    group = GROUPER.add(qvec, now=now) if len(text.split()) >= config.ROOT_CAUSE_MIN_WORDS else []
+    group = (GROUPER.add(qvec, now=now)
+             if group and len(text.split()) >= config.ROOT_CAUSE_MIN_WORDS else [])
     problem, change = known_links(qvec)
     return RootCause(group_ticket_ids=group, suggest_problem=len(group) >= GROUPER.min_group,
                      known_problem=problem, known_change=change)

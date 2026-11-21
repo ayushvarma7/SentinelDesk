@@ -24,15 +24,21 @@ src/sentineldesk/        the package (import with PYTHONPATH=src)
   rootcause.py           ITIL root-cause grouping + known Problem/Change    [Track A, done]
   retrieve.py            KB index + search                                  [Track B, todo]
   generate.py            grounded draft + citation verification             [Track C, todo]
-  gate.py, pii.py        escalation rules, PII masking
+  gate.py, pii.py        escalation rules + risk regexes, PII masking with dataset tokens  [P3, done]
+  burst.py               major-incident (burst) detector                                  [P3, done]
 scripts/
   prepare_data.py        writes data/processed/{kb_train,test_inputs,test_labels}.parquet
   train_classifier.py    trains the triage heads, tunes the P(high) threshold
   evaluate.py            holdout metrics (the only reader of test labels)
+  gate_sweep.py          tunes gate thresholds on the KB validation slice                [P3]
+  attack_table.py        25 attacks + burst scenario through the real pipeline           [P3]
 tests/test_contract.py   edge cases that must never crash
 tests/test_rootcause.py  root-cause grouping and KB linking
+tests/test_gate.py       pure gate / PII / burst tests                                   [P3]
+tests/test_adversarial.py  25 adversarial tickets (EN + DE)                              [P3]
 notebooks/01_eda.ipynb   EDA (KB split only)
 docs/p1_workdone.md      Track A results + takeover guide for retrieval/generation
+docs/p3_workdone.md      safety gate results, thresholds, attack table, Q&A prep
 ```
 
 ## Quick start
@@ -44,19 +50,20 @@ pip install -r requirements.txt
 python scripts/prepare_data.py
 PYTHONPATH=src python scripts/train_classifier.py   # ~1 min, plus 3-5 min the first time to encode the KB
 PYTHONPATH=src python scripts/evaluate.py           # holdout metrics -> reports/triage_metrics.json
-PYTHONPATH=src python tests/test_contract.py
+PYTHONPATH=src python -m pytest -q tests/           # contract + gate + adversarial
+PYTHONPATH=src python scripts/attack_table.py      # -> reports/attack_table.md
 ```
 
 ## Pipeline status
 
 | Stage | Status |
 |---|---|
-| PII masking, escalation gate | rules in place; thresholds still need tuning (see [docs/p1_workdone.md §6](docs/p1_workdone.md#6-findings-the-gate-owner-must-act-on)) |
+| PII masking, escalation gate, burst | live: thresholds tuned on the KB validation slice, 26/26 attack table ([docs/p3_workdone.md](docs/p3_workdone.md)) |
 | Embed | live: `multilingual-e5-small`, about 11 ms per ticket after warm-up |
 | Classify | live: frozen model, metrics below |
+| Retrieve | live: exact cosine over the e5 passage index, cross-lingual slot, live precedent store |
+| Generate | live: Gemini with citation/figure verification; extractive fallback without a key |
 | Root cause | live: groups similar live issues (suggests a Problem at 3+), links known KB Problems/Changes |
-| Retrieve | stub, Track B |
-| Generate | stub, Track C |
 
 ## Triage model
 
@@ -84,6 +91,34 @@ PYTHONPATH=src python tests/test_contract.py
 
 Priority ECE rises because the recall-oriented threshold labels tickets with P(high) as low as 0.25 as `high`.
 The trade is deliberate: a missed outage costs more than a false alarm.
+
+## Safety gate
+
+Deterministic rules, no LLM in the decision path. Every escalation reason is a sentence shown on the badge.
+
+| Rule | Action |
+|---|---|
+| Prompt injection, credential request, destructive bulk action, legal threat (EN + DE regexes) | Always escalate; injections never reach the LLM |
+| High priority + Incident **or Problem** (`CRITICAL_TYPES`, Track A) | Escalate to on-call |
+| 3+ similar tickets within 30 min (multilingual, `BURST_SIM=0.86`) | Major-incident banner + escalate |
+| Outage words + urgency words (e.g. "keeps dropping" + "immediately") | Escalate to on-call |
+| Any head below its confidence floor (type 0.75, queue 0.50, priority 0.70) | Human review |
+| Best precedent < 0.865 or mean top-3 < 0.845 (calibrated on hand-typed tickets) | Human review (no precedent) |
+| Refund / compensation request with no precedent that mentions it | Human review |
+| Empty, emoji-only or bare-URL ticket | Human review |
+
+Thresholds were chosen by `scripts/gate_sweep.py` on the 2,286-ticket KB validation slice, using a rule fixed in
+advance (≥95% of high-priority Incidents escalated, ≥25% auto-drafted, then the best queue accuracy on auto-drafted
+tickets).
+
+- **25.2%** of tickets are auto-drafted.
+- **97.0%** of high-priority Incidents are escalated.
+- Queue accuracy on auto-drafted tickets is **0.815**, against 0.609 on all tickets.
+
+PII is masked with the dataset's own tokens (`<email>`, `<tel_num>`, `<acc_num>`) before any external call.
+Attack table: `reports/attack_table.md` (26/26).
+
+The sweep numbers above were measured with the Incident-only hard rule; including Problem escalates more (see Root-cause grouping below).
 
 ## Root-cause grouping (ITIL)
 
