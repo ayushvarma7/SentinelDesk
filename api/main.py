@@ -157,9 +157,11 @@ def _iso(ts: float) -> str:
 
 
 def _summary(subject: str, body: str) -> str:
-    first = re.split(r"(?<=[.!?])\s+", (body or "").strip())[0] if body else ""
-    s = (first or subject or "(no text)").strip()
-    return s[:180] + ("…" if len(s) > 180 else "")
+    # Length cut at a word boundary, not a sentence split ("St. Mary's" broke that).
+    s = re.sub(r"\s+", " ", (body or subject or "(no text)")).strip()
+    if len(s) <= 200:
+        return s
+    return s[:200].rsplit(" ", 1)[0] + "…"
 
 
 def _tags(r: dict) -> list[str]:
@@ -180,14 +182,20 @@ def _copilot(subject: str, body: str, r: dict) -> dict:
         return {"text": r["draft_reply"], "cited_ids": r["cited_ticket_ids"],
                 "unverified": r["unverified_claims"], "source": "draft"}
     text = f"{subject}\n{body}"
+    none = {"text": None, "cited_ids": [], "unverified": [], "source": "none"}
+    if any("Too little text" in x for x in r.get("escalation_reasons", [])):
+        return none  # nothing to resolve; the human has to read it
+    if set(r.get("risks", [])) & {"prompt_injection", "credential_request", "destructive_action", "legal"}:
+        return none  # never hand the operator a ready-to-send reply to an attack or legal threat
     lang = r["language"]
     sug = mock_engine.suggestion(text, lang)
     precs = r.get("precedents", [])
     if not sug and precs:
-        p = precs[0]
-        sug = f"Closest precedent [{p['ticket_id']}] ({p['score']:.3f}) was resolved with: {p['answer']}"
+        # Quote the closest same-language precedent, like generate.py's extractive fallback.
+        p = next((x for x in precs if x["language"] == lang), precs[0])
+        sug = f"{p['answer']} [{p['ticket_id']}]"
     if not sug:
-        return {"text": None, "cited_ids": [], "unverified": [], "source": "none"}
+        return none
     from sentineldesk.generate import unsupported_figures
     ids = list(dict.fromkeys(re.findall(r"(?:TKT|LIVE)-\d{5}", sug)))
     unverified = unsupported_figures(sug, " ".join(p["answer"] for p in precs))

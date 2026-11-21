@@ -1,4 +1,4 @@
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, LabelList } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, LabelList } from 'recharts'
 import { Activity, Gauge, ShieldAlert, Target } from 'lucide-react'
 import type { Metrics } from '../api'
 import { useT } from '../i18n'
@@ -37,16 +37,34 @@ export default function Dashboard({ m }: { m: Metrics | null }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title={t('byPriority')}>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie data={prio} dataKey="value" nameKey="name" innerRadius={62} outerRadius={100} paddingAngle={1.5}
-                stroke="#fff" strokeWidth={2} label={({ name, value }) => `${name}: ${value}`} labelLine={false} isAnimationActive>
-                {prio.map(p => <Cell key={p.key} fill={PRIO_COLOR[p.key]} />)}
-              </Pie>
-              <Tooltip formatter={(v) => [v, '']} />
-              <Legend verticalAlign="bottom" iconType="circle" formatter={(v) => <span className="text-sm text-slate-700">{v}</span>} />
-            </PieChart>
-          </ResponsiveContainer>
+          <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
+            <div className="relative h-[240px] w-[240px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={prio} dataKey="value" nameKey="name" innerRadius={70} outerRadius={110} paddingAngle={1.5}
+                    stroke="#fff" strokeWidth={2} startAngle={90} endAngle={-270}>
+                    {prio.map(p => <Cell key={p.key} fill={PRIO_COLOR[p.key]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v, n) => [`${v} (${m.total ? Math.round(Number(v) / m.total * 100) : 0}%)`, n]} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-3xl font-bold tabular-nums text-navy">{m.total}</span>
+                <span className="text-xs text-slate-500">{t('tickets')}</span>
+              </div>
+            </div>
+            {/* legend doubles as the data table: label + count + share, so identity never relies on colour */}
+            <ul className="min-w-[160px] space-y-2.5">
+              {prio.map(p => (
+                <li key={p.key} className="flex items-center gap-2.5 text-sm">
+                  <span className="h-3 w-3 rounded-sm" style={{ background: PRIO_COLOR[p.key] }} />
+                  <span className="flex-1 text-slate-700">{p.name}</span>
+                  <span className="font-semibold tabular-nums text-slate-900">{p.value}</span>
+                  <span className="w-10 text-right text-xs tabular-nums text-slate-500">{m.total ? Math.round(p.value / m.total * 100) : 0}%</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </ChartCard>
 
         <ChartCard title={t('outcome')}>

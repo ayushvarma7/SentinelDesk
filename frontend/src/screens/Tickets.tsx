@@ -8,6 +8,7 @@ import TicketDetail from './TicketDetail'
 
 type SortKey = 'id' | 'subject' | 'priority' | 'type' | 'queue' | 'created_at' | 'status' | 'assigned_to' | 'confidence'
 const PRIO_RANK = { high: 0, medium: 1, low: 2 } as const
+const isHot = (tag: string) => /injection|credential|destructive|^legal$|major-incident/.test(tag)
 
 export default function Tickets({ tickets, reload, onUpdate, loading }: {
   tickets: Ticket[]; reload: () => void; onUpdate: (t: Ticket) => void; loading: boolean
@@ -94,7 +95,7 @@ export default function Tickets({ tickets, reload, onUpdate, loading }: {
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-sm">
+          <table className="w-full min-w-[1000px] text-sm">
             <thead className="bg-navy text-xs uppercase tracking-wide text-slate-300">
               <tr>
                 <Th k="id" label={t('id')} className="pl-4" />
@@ -114,22 +115,22 @@ export default function Tickets({ tickets, reload, onUpdate, loading }: {
                 <tr key={x.id} onClick={() => setOpenId(x.id)}
                   className={`cursor-pointer border-l-4 transition-colors ${PRIO_STYLE[x.priority]?.row} ${PRIO_STYLE[x.priority]?.bar}`}>
                   <td className="whitespace-nowrap px-3 py-2.5 pl-4 font-mono text-xs font-semibold text-navy">{x.id}</td>
-                  <td className="max-w-[320px] px-3 py-2.5">
+                  <td className="max-w-[260px] px-3 py-2.5">
                     <div className="truncate font-medium text-slate-900">{x.subject}</div>
                     <div className="truncate text-xs text-slate-500">{x.requester.name} · {x.language.toUpperCase()}</div>
                   </td>
                   <td className="px-3 py-2.5"><PriorityBadge p={x.priority} /></td>
                   <td className="px-3 py-2.5 text-slate-700">{x.type}</td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-700">{x.queue}</td>
+                  <td className="max-w-[170px] truncate px-3 py-2.5 text-slate-700" title={x.queue}>{x.queue}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-600">{fmtDate(x.created_at, lang)}</td>
                   <td className="px-3 py-2.5"><StatusPill s={x.status} /></td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-700">{x.assigned_to}</td>
+                  <td className="max-w-[150px] truncate px-3 py-2.5 text-slate-700" title={x.assigned_to}>{x.assigned_to}</td>
                   <td className="px-3 py-2.5">
-                    <div className="flex max-w-[200px] flex-wrap gap-1">
-                      {x.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${tag.includes('injection') || tag.includes('credential') || tag.includes('destructive') || tag === 'legal' || tag === 'major-incident' ? 'bg-red-600 text-white' : 'bg-white/80 text-slate-600 ring-1 ring-slate-200'}`}>{tag}</span>
+                    <div className="flex max-w-[170px] items-center gap-1 overflow-hidden" title={x.tags.join(', ')}>
+                      {[...x.tags].sort((a, b) => Number(isHot(b)) - Number(isHot(a))).slice(0, 2).map(tag => (
+                        <span key={tag} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${isHot(tag) ? 'bg-red-600 text-white' : 'bg-white/80 text-slate-600 ring-1 ring-slate-200'}`}>{tag}</span>
                       ))}
-                      {x.tags.length > 3 && <span className="text-[10px] text-slate-400">+{x.tags.length - 3}</span>}
+                      {x.tags.length > 2 && <span className="text-[10px] text-slate-400">+{x.tags.length - 2}</span>}
                     </div>
                   </td>
                   <td className="px-3 py-2.5"><ConfidenceBar v={x.confidence} /></td>

@@ -201,7 +201,7 @@ function AgentView({ ticket, openPrec, onOverride }: { ticket: Ticket; openPrec:
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-white"><ShieldCheck size={16} /></span>
             <div>
               <div className="font-semibold text-teal-900">{t('handledByAgent')}</div>
-              <div className="text-xs text-teal-700">{ticket.triage.engine ?? '—'} · {ticket.triage.latency_ms.total?.toFixed(0)} ms · <PiiChip ticket={ticket} /></div>
+              <div className="flex items-center gap-2 text-xs text-teal-700">{ticket.triage.engine ?? '—'} · {ticket.triage.latency_ms.total?.toFixed(0)} ms <PiiChip ticket={ticket} /></div>
             </div>
           </div>
           <button onClick={onOverride} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50">

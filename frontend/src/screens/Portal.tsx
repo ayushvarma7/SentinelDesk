@@ -91,7 +91,7 @@ export default function Portal() {
           <div className="relative mt-5 max-w-xl">
             <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('searchHelp')}
-              className="w-full rounded-xl border-0 py-3 pl-10 pr-4 text-slate-900 outline-none ring-2 ring-transparent focus:ring-coral" />
+              className="w-full rounded-xl border-0 bg-white py-3 pl-10 pr-4 text-slate-900 placeholder:text-slate-400 outline-none ring-2 ring-transparent focus:ring-coral" />
           </div>
         </div>
 
