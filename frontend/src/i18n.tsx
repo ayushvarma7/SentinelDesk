@@ -33,6 +33,8 @@ const DICT = {
     outcome: 'Auto-resolved vs escalated', autoResolved: 'Auto-resolved', escalated: 'Escalated',
     holdout: 'holdout, predicted high + Incident', gateEsc: 'gate escalates', ofHighInc: 'of high Incidents (validation)',
     mock: 'MOCK', live: 'LIVE', apiDown: 'API not reachable at', loading: 'Loading…', view: 'View',
+    qAll: 'All', qNeedsMe: 'Needs me', qAuto: 'Auto-handled', qMajor: 'Major incident', qSla: 'SLA < 1h',
+    replay: 'Replay agent', simulate: 'Simulate outage',
   },
   de: {
     tickets: 'Tickets', organisation: 'Organisation', portal: 'Kundenportal', dashboard: 'Dashboard',
@@ -64,6 +66,8 @@ const DICT = {
     outcome: 'Automatisch gelöst vs. eskaliert', autoResolved: 'Automatisch gelöst', escalated: 'Eskaliert',
     holdout: 'Holdout, hoch + Incident vorhergesagt', gateEsc: 'Gate eskaliert', ofHighInc: 'der kritischen Störungen (Validierung)',
     mock: 'MOCK', live: 'LIVE', apiDown: 'API nicht erreichbar unter', loading: 'Lädt…', view: 'Ansehen',
+    qAll: 'Alle', qNeedsMe: 'Braucht mich', qAuto: 'Automatisch', qMajor: 'Größere Störung', qSla: 'SLA < 1 Std.',
+    replay: 'Agent abspielen', simulate: 'Ausfall simulieren',
   },
 } as const
 

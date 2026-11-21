@@ -1,41 +1,56 @@
-import { useContext, useEffect, useState } from 'react'
-import {
-  AlertTriangle, ArrowLeft, Bot, Check, CheckCircle2, ChevronDown, CircleDashed, Clock, Edit3, Loader2,
-  ShieldAlert, ShieldCheck, Send, Sparkles, UserCheck, UserRound, XCircle, MinusCircle, Languages, Lock,
-} from 'lucide-react'
-import { api, type Phase, type Precedent, type Ticket } from '../api'
+import { useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { ArrowLeft, Bot, Check, Clock, Edit3, Languages, Loader2, Lock, Send, ShieldCheck, Sparkles, UserCheck, UserRound, XCircle } from 'lucide-react'
+import { api, type Precedent, type Ticket } from '../api'
 import { LangContext, useT } from '../i18n'
-import { Card, CitedText, PrecedentModal, PriorityBadge, SlaCountdown, StatusPill, fmtDate } from '../ui'
+import { useToast } from '../toast'
+import { Card, PiiText, PrecedentModal, PriorityBadge, SlaCountdown, StatusPill, fmtDate } from '../ui'
+import DraftEditor from '../components/DraftEditor'
+import PhaseTimeline from '../components/PhaseTimeline'
+import EscalationCards from '../components/EscalationCards'
 
 const DONE = ['Closed', 'Auto-Resolved']
 
-export default function TicketDetail({ ticket, onBack, onUpdate }: { ticket: Ticket; onBack: () => void; onUpdate: (t: Ticket) => void }) {
+export default function TicketDetail({ ticket, onBack, onUpdate, replay }: {
+  ticket: Ticket; onBack: () => void; onUpdate: (t: Ticket) => void; replay: number
+}) {
   const t = useT()
+  const toast = useToast()
   const [override, setOverride] = useState(false)
   const [prec, setPrec] = useState<Precedent | null>(null)
+  useEffect(() => { setOverride(false) }, [ticket.id])
   const copilotView = ticket.escalated || ticket.priority === 'high' || override
 
   return (
     <div className="space-y-4">
-      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-navy">
-        <ArrowLeft size={15} />{t('back')}
-      </button>
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-navy">
+          <ArrowLeft size={15} />{t('back')}
+        </button>
+        <span className="text-xs text-slate-400"><kbd className="rounded border border-slate-300 bg-white px-1.5 font-mono text-[10px]">Esc</kbd> to go back</span>
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-mono text-sm font-semibold text-coral">{ticket.id}</span>
         <h1 className="text-xl font-bold text-navy">{ticket.subject}</h1>
         <PriorityBadge p={ticket.priority} /><StatusPill s={ticket.status} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      <PhaseTimeline phases={ticket.agent_trace} replay={replay + (override ? 1000 : 0)} escalated={ticket.escalated} />
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-4">
           {copilotView
             ? <CopilotCard ticket={ticket} onUpdate={onUpdate} openPrec={setPrec} />
-            : <AgentView ticket={ticket} openPrec={setPrec} onOverride={async () => { onUpdate(await api.reject(ticket.id, 'Override')); setOverride(true) }} />}
+            : <AgentView ticket={ticket} openPrec={setPrec} onOverride={async () => {
+                try {
+                  onUpdate(await api.reject(ticket.id, 'Override'))
+                  setOverride(true)
+                  toast('info', `Override on ${ticket.id}`, 'Draft moved to you for editing')
+                } catch (e) { toast('warning', 'Override failed', (e as Error).message) }
+              }} />}
           <Card className="p-5">
-            <SectionTitle>{t('ticketBody')}</SectionTitle>
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{ticket.body || '—'}</p>
+            <SectionTitle icon={<Lock size={12} />}>{t('ticketBody')}</SectionTitle>
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{ticket.body ? <PiiText text={ticket.body} /> : '—'}</p>
           </Card>
-          {copilotView && <TraceCard phases={ticket.agent_trace} animate={false} />}
         </div>
         <SideForm ticket={ticket} />
       </div>
@@ -44,7 +59,7 @@ export default function TicketDetail({ ticket, onBack, onUpdate }: { ticket: Tic
   )
 }
 
-function SectionTitle({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
+function SectionTitle({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">{icon}{children}</div>
 }
 
@@ -64,28 +79,33 @@ function PiiChip({ ticket }: { ticket: Ticket }) {
 /* ---------------------------------------------------------------- high priority / escalated */
 function CopilotCard({ ticket, onUpdate, openPrec }: { ticket: Ticket; onUpdate: (t: Ticket) => void; openPrec: (p: Precedent) => void }) {
   const t = useT()
+  const toast = useToast()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(ticket.copilot.text ?? '')
   const [busy, setBusy] = useState<string | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  useEffect(() => { setDraft(ticket.copilot.text ?? '') }, [ticket.id, ticket.copilot.text])
+  const [blocking, setBlocking] = useState(0)
+  useEffect(() => { setDraft(ticket.copilot.text ?? ''); setEditing(false) }, [ticket.id, ticket.copilot.text])
+  const onBlocking = useCallback((n: number) => setBlocking(n), [])
 
-  const act = async (name: string, fn: () => Promise<Ticket>) => {
-    setBusy(name); setErr(null)
-    try { onUpdate(await fn()); setEditing(false) } catch (e) { setErr(String((e as Error).message)) } finally { setBusy(null) }
+  const act = async (name: string, fn: () => Promise<Ticket>, ok: [string, string]) => {
+    setBusy(name)
+    try { onUpdate(await fn()); setEditing(false); toast('success', ok[0], ok[1]) }
+    catch (e) { toast('warning', `${name} failed`, (e as Error).message) }
+    finally { setBusy(null) }
   }
   const closed = ticket.status === 'Closed'
   const high = ticket.priority === 'high'
   const r = ticket.triage
+  const blockedWhy = !draft.trim() ? 'Write a reply first' : blocking ? `Resolve ${blocking} amber issue${blocking > 1 ? 's' : ''} in Suggestions first (Accept or Dismiss)` : null
 
   return (
-    <Card className={`overflow-hidden ${high ? 'ring-2 ring-coral/60' : ''}`}>
-      <div className={`flex flex-wrap items-center justify-between gap-3 px-5 py-3 ${high ? 'bg-navy text-white' : 'bg-slate-800 text-white'}`}>
+    <Card className="rounded-xl">
+      <div className={`flex flex-wrap items-center justify-between gap-3 rounded-t-xl px-5 py-3 text-white ${high ? 'bg-navy' : 'bg-slate-800'}`}>
         <div className="flex items-center gap-2.5">
-          <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${high ? 'bg-coral pulse-ring' : 'bg-white/15'}`}><Sparkles size={16} /></span>
+          <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${high ? 'pulse-ring bg-coral' : 'bg-white/15'}`}><Sparkles size={16} /></span>
           <div>
-            <div className="text-xs uppercase tracking-wider text-slate-300">AI Copilot</div>
-            <div className="font-semibold">{high ? t('needsYou') : t('needsReview')}</div>
+            <div className="text-[11px] uppercase tracking-wider text-slate-300">AI Copilot</div>
+            <div className="font-semibold">{closed ? 'Resolved by you' : high ? t('needsYou') : ticket.escalated ? t('needsReview') : 'Overridden — you own this reply'}</div>
           </div>
         </div>
         <div className="flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5">
@@ -96,7 +116,7 @@ function CopilotCard({ ticket, onUpdate, openPrec }: { ticket: Ticket; onUpdate:
 
       <div className="space-y-5 p-5">
         <div>
-          <p className="line-clamp-2 text-[15px] font-medium leading-snug text-slate-900">{ticket.summary}</p>
+          <p className="line-clamp-2 text-[15px] font-medium leading-snug text-slate-900"><PiiText text={ticket.summary} /></p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-slate-600">
             <span className="inline-flex items-center gap-1"><UserRound size={14} />{t('raisedBy')}: <b className="font-medium text-slate-800">{ticket.requester.name}</b></span>
             <span className="inline-flex items-center gap-1"><Languages size={14} />{t('language')}: <b className="font-medium uppercase text-slate-800">{ticket.language}</b></span>
@@ -106,63 +126,55 @@ function CopilotCard({ ticket, onUpdate, openPrec }: { ticket: Ticket; onUpdate:
 
         {r.escalation_reasons.length > 0 && (
           <div>
-            <SectionTitle icon={<ShieldAlert size={13} />}>{t('escalationReasons')}</SectionTitle>
-            <div className="flex flex-wrap gap-2">
-              {r.escalation_reasons.map(x => {
-                const hard = /injection|credential|destructive|Legal|Security|major incident|Critical/i.test(x)
-                return <span key={x} className={`rounded-md px-2.5 py-1 text-xs font-medium ${hard ? 'bg-red-100 text-red-800 ring-1 ring-red-200' : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'}`}>{x}</span>
-              })}
-            </div>
+            <SectionTitle>{t('escalationReasons')}</SectionTitle>
+            <EscalationCards reasons={r.escalation_reasons} />
           </div>
         )}
 
         <div>
           <SectionTitle icon={<Bot size={13} />}>{closed ? t('finalReply') : t('recommended')}</SectionTitle>
           {closed && ticket.final_reply ? (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm">
-              <CitedText text={ticket.final_reply} precedents={r.precedents} onOpen={openPrec} />
-            </div>
-          ) : editing ? (
-            <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={6}
-              className="w-full rounded-lg border border-navy/30 p-3 text-sm outline-none focus:ring-2 focus:ring-navy/15" />
-          ) : ticket.copilot.text ? (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
-              <CitedText text={draft || ticket.copilot.text} precedents={r.precedents} onOpen={openPrec} />
-            </div>
-          ) : <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500">{t('noDraft')}</div>}
-
-          {ticket.copilot.unverified.length > 0 && !closed && (
-            <div className="mt-2 space-y-1.5">
-              {ticket.copilot.unverified.map(u => (
-                <div key={u} className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <AlertTriangle size={14} className="mt-px shrink-0 text-amber-500" />
-                  <span><b>{t('unverified')}:</b> “{u}” is not supported by any retrieved precedent.</span>
-                </div>
-              ))}
+            <DraftEditor text={ticket.final_reply} precedents={r.precedents} unverified={[]} lang={ticket.language} readOnly openPrec={openPrec} resetKey={ticket.id} />
+          ) : ticket.copilot.text || editing ? (
+            <DraftEditor text={draft} onChange={setDraft} precedents={r.precedents} unverified={ticket.copilot.unverified}
+              lang={ticket.language} editing={editing} openPrec={openPrec} onBlocking={onBlocking} resetKey={ticket.id} />
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">
+              {t('noDraft')}
+              <div><button onClick={() => setEditing(true)} className="mt-2 text-sm font-semibold text-navy hover:underline">Write a reply</button></div>
             </div>
           )}
         </div>
 
         {!closed && (
-          <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-            <button disabled={!!busy || !draft.trim()} onClick={() => act('approve', () => api.approve(ticket.id, draft !== ticket.copilot.text ? draft : undefined))}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-coral px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-coral-dark disabled:opacity-50">
-              {busy === 'approve' ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}{t('approve')}
-            </button>
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+            <span className="group relative">
+              <button disabled={!!busy || !!blockedWhy}
+                onClick={() => act('Approve', () => api.approve(ticket.id, draft !== ticket.copilot.text ? draft : undefined),
+                  [`Reply sent on ${ticket.id}`, `${ticket.requester.name} will see it in the portal`])}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-coral px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-coral-dark disabled:cursor-not-allowed disabled:opacity-45">
+                {busy === 'Approve' ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}{t('approve')}
+              </button>
+              {blockedWhy && (
+                <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-30 mb-2 hidden w-64 rounded-lg bg-navy px-3 py-2 text-xs text-white shadow-xl group-hover:block">
+                  {blockedWhy}
+                </span>
+              )}
+            </span>
             <button onClick={() => setEditing(e => !e)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50">
               {editing ? <Check size={15} /> : <Edit3 size={15} />}{editing ? t('save') : t('edit')}
             </button>
-            <button disabled={!!busy} onClick={() => act('assign', () => api.assign(ticket.id))}
+            <button disabled={!!busy} onClick={() => act('Assign', () => api.assign(ticket.id), [`${ticket.id} assigned to you`, ticket.status === 'New' ? 'Status moved to In Progress' : `Status stays ${ticket.status}`])}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
               <UserCheck size={15} />{t('assignMe')}
             </button>
-            <button disabled={!!busy} onClick={() => act('reject', () => api.reject(ticket.id))}
+            {blocking > 0 && <span className="text-xs font-medium text-amber-700">{blocking} blocking issue{blocking > 1 ? 's' : ''}</span>}
+            <button disabled={!!busy} onClick={() => act('Reject', () => api.reject(ticket.id), [`AI draft rejected on ${ticket.id}`, 'Ticket stays with you, In Progress'])}
               className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
               <XCircle size={15} />{t('reject')}
             </button>
           </div>
         )}
-        {err && <div className="text-sm text-red-600">{err}</div>}
         <PrecedentList precs={r.precedents} cited={ticket.copilot.cited_ids} openPrec={openPrec} />
       </div>
     </Card>
@@ -178,10 +190,12 @@ function PrecedentList({ precs, cited, openPrec }: { precs: Precedent[]; cited: 
       <div className="grid gap-2 sm:grid-cols-3">
         {precs.slice(0, 3).map(p => (
           <button key={p.ticket_id} onClick={() => openPrec(p)}
-            className={`rounded-lg border p-3 text-left text-xs hover:border-navy/40 hover:bg-slate-50 ${cited.includes(p.ticket_id) ? 'border-navy/30 bg-navy/[0.03]' : 'border-slate-200'}`}>
+            className={`rounded-lg border p-3 text-left text-xs transition hover:border-navy/40 hover:bg-slate-50 ${cited.includes(p.ticket_id) ? 'border-navy/30 bg-navy/[0.03]' : 'border-slate-200'}`}>
             <div className="flex items-center justify-between font-mono font-semibold text-navy"><span>{p.ticket_id}</span><span className="text-slate-500">{p.score.toFixed(3)}</span></div>
             <div className="mt-1 line-clamp-2 text-slate-700">{p.subject}</div>
-            <div className="mt-1 text-[10px] uppercase text-slate-400">{p.language} · {p.queue}</div>
+            <div className="mt-1 flex items-center justify-between text-[10px] uppercase text-slate-400">
+              <span>{p.language} · {p.queue}</span>{cited.includes(p.ticket_id) && <span className="rounded bg-navy px-1 text-white">cited</span>}
+            </div>
           </button>
         ))}
       </div>
@@ -194,92 +208,30 @@ function AgentView({ ticket, openPrec, onOverride }: { ticket: Ticket; openPrec:
   const t = useT()
   const reply = ticket.final_reply ?? ticket.triage.draft_reply
   return (
-    <>
-      <Card className="overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-teal-50 px-5 py-3">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-white"><ShieldCheck size={16} /></span>
-            <div>
-              <div className="font-semibold text-teal-900">{t('handledByAgent')}</div>
-              <div className="flex items-center gap-2 text-xs text-teal-700">{ticket.triage.engine ?? '—'} · {ticket.triage.latency_ms.total?.toFixed(0)} ms <PiiChip ticket={ticket} /></div>
-            </div>
+    <Card className="rounded-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-teal-100 bg-teal-50 px-5 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-white"><ShieldCheck size={16} /></span>
+          <div>
+            <div className="font-semibold text-teal-900">{t('handledByAgent')}</div>
+            <div className="flex items-center gap-2 text-xs text-teal-700">{ticket.triage.engine ?? '—'} · {ticket.triage.latency_ms.total?.toFixed(0)} ms <PiiChip ticket={ticket} /></div>
           </div>
-          <button onClick={onOverride} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50">
-            <Edit3 size={14} />{t('override')}
-          </button>
         </div>
-        <TraceBody phases={ticket.agent_trace} animate />
-      </Card>
-      {reply && (
-        <Card className="p-5">
-          <SectionTitle icon={<Send size={13} />}>{ticket.final_reply ? t('finalReply') : t('draftReply')}</SectionTitle>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
-            <CitedText text={reply} precedents={ticket.triage.precedents} onOpen={openPrec} />
+        <button onClick={onOverride} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50">
+          <Edit3 size={14} />{t('override')}
+        </button>
+      </div>
+      <div className="space-y-4 p-5">
+        {reply ? (
+          <div>
+            <SectionTitle icon={<Send size={13} />}>{ticket.final_reply ? t('finalReply') : t('draftReply')}</SectionTitle>
+            <DraftEditor text={reply} precedents={ticket.triage.precedents} unverified={ticket.triage.unverified_claims}
+              lang={ticket.language} readOnly openPrec={openPrec} resetKey={ticket.id} />
           </div>
-          {ticket.triage.unverified_claims.map(u => (
-            <div key={u} className="mt-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <AlertTriangle size={14} className="mt-px shrink-0 text-amber-500" /><span><b>{t('unverified')}:</b> “{u}”</span>
-            </div>
-          ))}
-          <div className="mt-4"><PrecedentList precs={ticket.triage.precedents} cited={ticket.triage.cited_ticket_ids} openPrec={openPrec} /></div>
-        </Card>
-      )}
-    </>
-  )
-}
-
-function TraceCard({ phases, animate }: { phases: Phase[]; animate: boolean }) {
-  const t = useT()
-  return <Card><div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-navy">{t('agentTrace')}</div><TraceBody phases={phases} animate={animate} /></Card>
-}
-
-const PHASE_ICON = {
-  done: <CheckCircle2 size={18} className="text-teal-600" />,
-  warning: <AlertTriangle size={18} className="text-amber-500" />,
-  skipped: <MinusCircle size={18} className="text-slate-300" />,
-  escalated: <ShieldAlert size={18} className="text-coral" />,
-  failed: <XCircle size={18} className="text-red-600" />,
-}
-
-function TraceBody({ phases, animate }: { phases: Phase[]; animate: boolean }) {
-  const [shown, setShown] = useState(animate ? 0 : phases.length)
-  const [open, setOpen] = useState<Record<number, boolean>>({})
-  useEffect(() => {
-    if (!animate) { setShown(phases.length); return }
-    setShown(0)
-    const id = setInterval(() => setShown(s => { if (s >= phases.length) { clearInterval(id); return s } return s + 1 }), 380)
-    return () => clearInterval(id)
-  }, [phases, animate])
-
-  return (
-    <ol className="px-5 py-4">
-      {phases.map((p, i) => {
-        const visible = i < shown
-        const running = i === shown && animate
-        if (!visible && !running) return (
-          <li key={p.phase} className="flex gap-3 pb-3 opacity-40"><CircleDashed size={18} className="text-slate-300" /><span className="text-sm text-slate-400">{p.phase}</span></li>
-        )
-        return (
-          <li key={p.phase} className={`relative flex gap-3 pb-3 ${visible ? 'step-in' : ''}`}>
-            {i < phases.length - 1 && <span className="absolute left-[8.5px] top-6 h-[calc(100%-18px)] w-px bg-slate-200" />}
-            <span className="relative z-10 bg-white">{running ? <Loader2 size={18} className="animate-spin text-navy" /> : PHASE_ICON[p.status] ?? PHASE_ICON.done}</span>
-            <div className="min-w-0 flex-1">
-              <button className="flex w-full items-center justify-between gap-2 text-left" onClick={() => setOpen(o => ({ ...o, [i]: !o[i] }))} disabled={running}>
-                <span className={`text-sm font-medium ${p.status === 'skipped' ? 'text-slate-400' : 'text-slate-800'}`}>{p.phase}</span>
-                <span className="flex items-center gap-2 text-xs text-slate-400">
-                  {!running && <span className="font-mono tabular-nums">{p.duration_ms.toFixed(1)} ms</span>}
-                  <ChevronDown size={14} className={`transition-transform ${open[i] ? 'rotate-180' : ''}`} />
-                </span>
-              </button>
-              {!running && <div className="truncate text-xs text-slate-500">{p.logs[0]}</div>}
-              {open[i] && !running && (
-                <pre className="mt-1.5 overflow-x-auto rounded-md bg-navy px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-200">{p.logs.map(l => `› ${l}`).join('\n')}</pre>
-              )}
-            </div>
-          </li>
-        )
-      })}
-    </ol>
+        ) : <div className="rounded-lg border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500">No reply was drafted.</div>}
+        <PrecedentList precs={ticket.triage.precedents} cited={ticket.triage.cited_ticket_ids} openPrec={openPrec} />
+      </div>
+    </Card>
   )
 }
 
@@ -287,11 +239,11 @@ function TraceBody({ phases, animate }: { phases: Phase[]; animate: boolean }) {
 function SideForm({ ticket }: { ticket: Ticket }) {
   const t = useT()
   const { lang } = useContext(LangContext)
-  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <label className="block">
+  const Row = ({ label, children }: { label: string; children: ReactNode }) => (
+    <div>
       <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
       <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{children}</div>
-    </label>
+    </div>
   )
   return (
     <div className="space-y-4">

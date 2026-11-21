@@ -2,7 +2,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { Activity, Gauge, ShieldAlert, Target } from 'lucide-react'
 import type { Metrics } from '../api'
 import { useT } from '../i18n'
-import { Card } from '../ui'
+import { Card, Skeleton } from '../ui'
 
 // Validated (dataviz validate_palette.js, light): red / amber / green pass CVD + normal-vision checks.
 // Amber is < 3:1 against white, so the donut carries visible labels and a legend.
@@ -12,7 +12,13 @@ const AXIS = { fontSize: 12, fill: '#64748b' }
 
 export default function Dashboard({ m }: { m: Metrics | null }) {
   const t = useT()
-  if (!m) return <div className="py-20 text-center text-slate-400">{t('loading')}</div>
+  if (!m) return (
+    <div className="space-y-5">
+      <Skeleton className="h-8 w-48" />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map(i => <Card key={i} className="space-y-3 p-5"><Skeleton className="h-4 w-32" /><Skeleton className="h-8 w-24" /></Card>)}</div>
+      <div className="grid gap-4 lg:grid-cols-2">{[0, 1].map(i => <Card key={i} className="p-5"><Skeleton className="h-[260px]" /></Card>)}</div>
+    </div>
+  )
 
   const prio = (['high', 'medium', 'low'] as const).map(k => ({ key: k, name: t(k), value: m.by_priority[k] ?? 0 }))
   const queues = Object.entries(m.by_queue).map(([name, value]) => ({ name, value }))

@@ -109,7 +109,7 @@ export function PrecedentModal({ p, onClose }: { p: Precedent | null; onClose: (
   }, [onClose])
   if (!p) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-navy/40 p-4" onClick={onClose}>
+    <div data-modal className="fixed inset-0 z-50 flex items-center justify-center bg-navy/40 p-4" onClick={onClose}>
       <div className="w-full max-w-lg rounded-xl bg-white shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
           <div>
@@ -138,4 +138,27 @@ export function PrecedentModal({ p, onClose }: { p: Precedent | null; onClose: (
       </div>
     </div>
   )
+}
+
+/** Live SLA pill: red under 1h (or breached), amber under 4h. */
+export function SlaPill({ due, done, now }: { due: string; done: boolean; now: number }) {
+  if (done) return <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">Met</span>
+  const diff = new Date(due).getTime() - now
+  const abs = Math.abs(diff)
+  const h = Math.floor(abs / 3.6e6), m = Math.floor((abs % 3.6e6) / 6e4), s = Math.floor((abs % 6e4) / 1000)
+  const txt = h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h >= 1 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m ${String(s).padStart(2, '0')}s`
+  const cls = diff < 3.6e6 ? 'bg-red-600 text-white' : diff < 4 * 3.6e6 ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300' : 'bg-slate-100 text-slate-700'
+  return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums ${cls}`}>{diff < 0 ? `-${txt}` : txt}</span>
+}
+
+export function slaMinutesLeft(due: string, now: number) { return (new Date(due).getTime() - now) / 6e4 }
+
+export function Skeleton({ className = '' }: { className?: string }) { return <div className={`skeleton ${className}`} /> }
+
+const PII_RE = /(<(?:email|tel_num|acc_num|ip_address|name)>)/g
+/** Text with dataset PII tokens rendered as violet chips. */
+export function PiiText({ text }: { text: string }) {
+  return <>{text.split(PII_RE).map((part, i) => /^<(?:email|tel_num|acc_num|ip_address|name)>$/.test(part)
+    ? <span key={i} title="Masked before any external call" className="mx-0.5 inline-flex items-center rounded bg-violet-100 px-1.5 py-px font-mono text-[11px] font-semibold text-violet-800 ring-1 ring-violet-200">{part.slice(1, -1)}</span>
+    : <span key={i}>{part}</span>)}</>
 }

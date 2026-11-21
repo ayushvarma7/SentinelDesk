@@ -23,10 +23,19 @@ cd frontend && npm install && npm run dev
 
 | Screen | What it shows |
 |---|---|
-| Organisation › Tickets | Sortable/filterable table, rows tinted by priority, major-incident banner when the burst detector fires. Click a row: high-priority or escalated tickets open the AI copilot card (reasons, cited `[TKT-xxxxx]` chips, unverified-claim warnings, Approve & Send / Edit / Assign / Reject); others open the animated agent-trace stepper with an Override button. |
-| Dashboard | KPI tiles, tickets by priority (donut), by queue, auto-resolved vs escalated vs total. Recall KPI comes from `reports/triage_metrics.json`. |
+| Organisation › Tickets | Quick-filter chips (Needs me, Auto-handled, Major incident, SLA < 1h), sortable table with sticky header, rows tinted by priority, live SLA pills, hover preview, keyboard nav (`↑`/`↓`, `Enter`, `Esc`, `/` to search). Major-incident banner when the burst detector fired in the last 30 min. |
+| Ticket detail | Horizontal agent timeline (PII → Triage → Gate → Retrieve → Grade → Draft → Verify → Resolve) with a log panel. High-priority/escalated tickets get the AI copilot: escalation-reason cards and the draft editor. Others get "Handled by agent" with Override. |
+| Draft editor | Grammarly-style checks, computed client-side in `src/components/draftAnalysis.ts`: citations underlined (hover = precedent + similarity), unverified figures squiggled amber, PII tokens as violet chips, `+cite` markers on uncited claims. Suggestions rail with Accept/Dismiss; grounding score; Approve & Send is locked while amber issues are open. |
+| Dashboard | KPI tiles, tickets by priority, by queue, auto-resolved vs escalated vs total. |
 
-EN/DE toggle in the top bar switches UI labels. The amber **MOCK** badge means the API is serving mock triage.
+Grounding score = share of factual sentences that cite a retrieved precedent, minus 15 per open unverified figure
+and 25 per citation that was not retrieved.
+
+## Demo buttons (header)
+
+- **Replay agent** re-animates the timeline on the open ticket (or opens the newest auto-resolved one).
+- **Simulate outage** posts three VPN tickets (EN, EN, DE) through `POST /tickets`; the third trips the burst
+  detector and the red banner appears.
 
 ## API endpoints
 
