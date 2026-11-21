@@ -124,6 +124,33 @@ def test_burst_detector_window_and_threshold():
     assert len(d) == 0
 
 
+def test_pii_bank_payment_sentence():
+    """The account number is personal and must go; the bank name and the payment reference are what an
+    agent needs to find the payment, and neither identifies the person on its own, so they stay."""
+    text = ("I yesterday paid my fees through account number: 72942442 from chase bank "
+            "reference number: #42400")
+    masked, counts = pii.mask(text)
+    assert masked == ("I yesterday paid my fees through account number: <acc_num> from chase bank "
+                      "reference number: #42400"), masked
+    assert counts == {"account": 1}, counts                # not mistaken for a phone number
+    assert "72942442" not in masked
+    for kept in ("account number:", "chase bank", "#42400", "yesterday", "fees"):
+        assert kept in masked, kept
+
+
+def test_pii_account_labels_are_kept_values_masked():
+    cases = {
+        "Account no. 72942442": "Account no. <acc_num>",
+        "Kontonummer: 1234567890": "Kontonummer: <acc_num>",
+        "customer number 4471820": "customer number <acc_num>",
+        "account #AB12345": "account #<acc_num>",
+        "my account is locked": "my account is locked",          # no digits: nothing to mask
+        "Order #42400 and ticket 12345": "Order #42400 and ticket 12345",   # references stay
+    }
+    for text, want in cases.items():
+        assert pii.mask(text)[0] == want, (text, pii.mask(text)[0])
+
+
 if __name__ == "__main__":
     fns = [v for k, v in dict(globals()).items() if k.startswith("test_")]
     for fn in fns:

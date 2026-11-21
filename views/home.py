@@ -24,18 +24,19 @@ stat_strip([(len(kb), "", "resolved tickets in the knowledge base"),
             (2, "", "languages understood and answered"),
             (hi_inc, "%", "of tickets escalated straight to on-call")])
 
-cards = [("portal", "Customer portal", "Students and staff sign in, report incidents or request help, and track every ticket.",
-          "views/customer.py", "Open customer portal"),
+cards = [("spark", "Live triage", "Paste any ticket and see type, queue, priority, confidence, latency, the gate's "
+          "decision, cited past tickets and the draft.", "triage", "Open live triage"),
+         ("portal", "Customer portal", "Students and staff sign in, report incidents or request help, and track every ticket.",
+          "customer", "Open customer portal"),
          ("table", "Organisation", "A ServiceNow-style queue with predicted team, priority, SLA timers and an AI assistant.",
-          "views/agent.py", "Open organisation console"),
+          "agent", "Open organisation console"),
          ("chart", "Dashboard", "Volume, urgency and routing patterns, plus model accuracy on unseen tickets.",
-          "views/dashboard.py", "Open dashboard")]
-cols = st.columns(3, gap="medium")
-for col, (ic, title, desc, page, label) in zip(cols, cards):
-    with col:
-        st.markdown(f'<div class="card"><div class="ic">{icon(ic)}</div><div class="ct">{title}</div>'
-                    f'<div class="cd">{desc}</div></div>', unsafe_allow_html=True)
-        st.page_link(page, label=label, icon=":material/arrow_forward:")
+          "dashboard", "Open dashboard")]
+# One grid, so the three cards always share a height and their buttons line up.
+st.markdown('<div class="cards">' + "".join(
+    f'<div class="card link-card"><div class="ic">{icon(ic)}</div><div class="ct">{title}</div>'
+    f'<div class="cd">{desc}</div><a class="go" href="{path}" target="_self">{label} &rarr;</a></div>'
+    for ic, title, desc, path, label in cards) + '</div>', unsafe_allow_html=True)
 
 st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
 st.markdown('<div class="ph"><div><div class="t">How a ticket moves through SentinelDesk</div></div></div>',
