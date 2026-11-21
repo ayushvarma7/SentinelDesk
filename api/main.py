@@ -278,7 +278,8 @@ seed()
 app = FastAPI(title="SentinelDesk API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173",   # agent console
+                   "http://localhost:5174", "http://127.0.0.1:5174"],  # customer-portal app
     allow_methods=["*"], allow_headers=["*"],
 )
 
@@ -322,12 +323,13 @@ def triage(inp: TriageIn) -> dict:
 
 
 @app.get("/tickets")
-def list_tickets(requester: Optional[str] = None) -> list[dict]:
+def list_tickets(email: Optional[str] = None, requester: Optional[str] = None) -> list[dict]:
+    """All tickets, newest first. ?email= (customer portal) filters by requester email, case-insensitive.
+    ?requester= is the older alias. An empty value means no filter."""
     items = list(TICKETS.values())
-    if requester:
-        q = requester.strip().lower()
-        items = [t for t in items if t["requester"]["email"].lower() == q
-                 or t["requester"].get("phone", "") == q]
+    who = (email if email is not None else requester or "").strip().lower()
+    if who:
+        items = [t for t in items if t["requester"]["email"].lower() == who]
     return sorted(items, key=lambda t: t["created_at"], reverse=True)
 
 

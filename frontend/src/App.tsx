@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BarChart3, Headset, LayoutList, ShieldCheck, WifiOff } from 'lucide-react'
+import { BarChart3, LayoutList, ShieldCheck, WifiOff } from 'lucide-react'
 import { API_BASE, api, type Metrics, type Ticket } from './api'
 import { LangContext, useT, type Lang } from './i18n'
 import Tickets from './screens/Tickets'
-import Portal from './screens/Portal'
 import Dashboard from './screens/Dashboard'
 
-type Screen = 'tickets' | 'portal' | 'dashboard'
+type Screen = 'tickets' | 'dashboard'
 
 function Shell() {
   const t = useT()
@@ -33,7 +32,6 @@ function Shell() {
 
   const nav: [Screen, string, typeof LayoutList][] = [
     ['tickets', `${t('organisation')} › ${t('tickets')}`, LayoutList],
-    ['portal', t('portal'), Headset],
     ['dashboard', t('dashboard'), BarChart3],
   ]
 
@@ -71,7 +69,6 @@ function Shell() {
           </div>
         )}
         {screen === 'tickets' && <Tickets tickets={tickets} reload={reload} onUpdate={onUpdate} loading={loading} />}
-        {screen === 'portal' && <Portal />}
         {screen === 'dashboard' && <Dashboard m={metrics} />}
       </main>
     </div>

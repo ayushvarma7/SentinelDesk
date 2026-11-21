@@ -1,6 +1,6 @@
 # SentinelDesk frontend
 
-Vite + React + TypeScript + Tailwind v4 + recharts + lucide-react. Talks to the FastAPI app in `../api`.
+Vite + React + TypeScript + Tailwind v4 + recharts + lucide-react. Talks to the FastAPI app in `../api`. This is the agent console only; the customer portal is a separate app in `../customer-portal` (:5174), see `../.shared/HANDOFF.md`.
 
 ## Run
 
@@ -24,7 +24,6 @@ cd frontend && npm install && npm run dev
 | Screen | What it shows |
 |---|---|
 | Organisation › Tickets | Sortable/filterable table, rows tinted by priority, major-incident banner when the burst detector fires. Click a row: high-priority or escalated tickets open the AI copilot card (reasons, cited `[TKT-xxxxx]` chips, unverified-claim warnings, Approve & Send / Edit / Assign / Reject); others open the animated agent-trace stepper with an Override button. |
-| Customer Portal | Fake login (any email/phone; `h.ortiz@stmarys-health.org` has seeded history), Raise Incident / Raise Request forms, ticket history, floating assistant that shows the drafted reply. |
 | Dashboard | KPI tiles, tickets by priority (donut), by queue, auto-resolved vs escalated vs total. Recall KPI comes from `reports/triage_metrics.json`. |
 
 EN/DE toggle in the top bar switches UI labels. The amber **MOCK** badge means the API is serving mock triage.

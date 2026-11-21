@@ -65,7 +65,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => req<{ ok: boolean; mode: string; reason: string; tickets: number }>('/health'),
   tickets: (requester?: string) =>
-    req<Ticket[]>('/tickets' + (requester ? `?requester=${encodeURIComponent(requester)}` : '')),
+    req<Ticket[]>('/tickets' + (requester ? `?email=${encodeURIComponent(requester)}` : '')),
   ticket: (id: string) => req<Ticket>(`/tickets/${encodeURIComponent(id)}`),
   create: (b: { subject: string; body: string; name: string; email: string; kind: string }) =>
     req<Ticket>('/tickets', { method: 'POST', body: JSON.stringify(b) }),
