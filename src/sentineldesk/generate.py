@@ -61,8 +61,10 @@ SYSTEM_PROMPT = """You draft replies for a customer support team.
 5. If the precedents do not cover the request, say what you can confirm, say
    plainly that the rest needs a colleague, and set grounded to false.
 6. Do not promise anything a precedent does not already promise.
-7. Precedents contain anonymisation tokens such as <name>, <tel_num> and
-   <acc_num>. Never copy them; write around them.
+7. Both the ticket and the precedents may contain placeholders such as
+   <name>, <email>, <tel_num>, <acc_num>. Some are masked personal data from
+   the customer's own message. Never copy a placeholder into your reply; refer
+   to the thing in words ("your email address", "the account on file").
 8. 80-170 words, professional, no placeholder names, and no signature block
    beyond "Your Support Team" / "Ihr Support-Team".
 
@@ -70,14 +72,47 @@ Return JSON: {{"reply": str, "cited_ticket_ids": [str], "grounded": bool,
 "unsupported_requests": [str]}}"""
 
 
-def scrub(text: str) -> str:
+# P3's pii.mask() rewrites real PII into these same angle-bracket tokens before
+# the ticket reaches the LLM, so the model sees — and sometimes echoes — them.
+# Deleting those would garble the sentence ("we will call  once account  is
+# verified"), so they are spoken in words instead. Tokens that are dataset
+# noise rather than masked PII are still removed outright.
+_PII_PHRASE = {
+    "en": {"<email>": "your email address", "<tel_num>": "your phone number",
+           "<acc_num>": "your account number", "<ip_address>": "the IP address"},
+    "de": {"<email>": "Ihre E-Mail-Adresse", "<tel_num>": "Ihre Telefonnummer",
+           "<acc_num>": "Ihre Kontonummer", "<ip_address>": "die IP-Adresse"},
+}
+
+
+def scrub(text: str, language: str = "en") -> str:
     """Clean anything a customer will see.
 
-    Strips both token shapes, and converts the dataset's literal backslash-n
-    (809 KB answers store newlines that way) into real newlines. Citations
-    survive: [TKT-01234] is excluded from the bracket pattern.
+    Converts the dataset's literal backslash-n (809 KB answers store newlines
+    that way), turns masked-PII tokens into readable phrases, and removes the
+    remaining anonymisation tokens. Citations survive: [TKT-01234] is excluded
+    from the bracket pattern.
     """
     text = (text or "").replace("\\n", "\n")
+    text = re.sub(r"<\s*/?\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
+
+    phrases = _PII_PHRASE.get(language, _PII_PHRASE["en"])
+    # "account <acc_num>" must not become "account your account number", so a
+    # preceding noun that the phrase already contains is absorbed.
+    _LEAD = {"<email>": r"(?:e-?mail(?:\s+address)?|E-?Mail(?:-Adresse)?)",
+             "<tel_num>": r"(?:phone(?:\s+number)?|telephone|Telefon(?:nummer)?)",
+             "<acc_num>": r"(?:account(?:\s+number)?|Konto(?:nummer)?|Kundennummer)",
+             "<ip_address>": r"(?:IP(?:\s+address)?|IP-Adresse)"}
+    for token, phrase in phrases.items():
+        lead = _LEAD.get(token)
+        if lead:
+            # also absorb a determiner: "Your account number <acc_num>" must not
+            # become "Your your account number".
+            det = r"(?:your|their|our|the|a|an|Ihre[rnms]?|die|der|das|eine[rnms]?)\s+"
+            text = re.sub(rf"\b(?:{det})?{lead}\s+{re.escape(token)}", phrase, text,
+                          flags=re.IGNORECASE)
+        text = re.sub(re.escape(token), phrase, text, flags=re.IGNORECASE)
+
     text = _TOKEN.sub("", text)
     text = _BRACKET_TOKEN.sub("", text)
     text = re.sub(r"[ \t]+([,.;:!?])", r"\1", text)      # "Dear ," -> "Dear,"
@@ -86,7 +121,11 @@ def scrub(text: str) -> str:
     text = re.sub(r"\bSehr geehrte[rs]?\s*,", "Sehr geehrte Damen und Herren,", text)
     text = re.sub(r"\b(Dear|Hello|Hi)\s*,", r"\1 customer,", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    # absorbing a determiner can lowercase a sentence start
+    text = re.sub(r"(^|[.!?]\s+|\n\s*)([a-zäöü])",
+                  lambda m: m.group(1) + m.group(2).upper(), text)
+    return text
 
 
 def unsupported_figures(reply: str, evidence: str) -> list[str]:
@@ -136,7 +175,7 @@ def _extractive(text: str, language: str, precedents: list[Precedent]) -> dict:
 
     same = [p for p in precedents if p.language == language]
     best = (same or precedents)[0]
-    snippet = scrub(re.sub(r"\s+", " ", best.answer))[:450].rstrip()
+    snippet = scrub(re.sub(r"\s+", " ", best.answer), language)[:450].rstrip()
 
     if language == "de":
         reply = (f"Vielen Dank für Ihre Nachricht. Ein vergleichbarer Fall wurde bereits "
@@ -154,12 +193,12 @@ def _extractive(text: str, language: str, precedents: list[Precedent]) -> dict:
             "engine": "extractive-fallback", "error": None}
 
 
-def _build_user_prompt(text: str, precedents: list[Precedent]) -> str:
+def _build_user_prompt(text: str, precedents: list[Precedent], language: str = "en") -> str:
     blocks = []
     for p in precedents:
         blocks.append(
             f"--- PRECEDENT {p.ticket_id} (similarity {p.score:.3f}, {p.language}, {p.queue})\n"
-            f"Subject: {p.subject}\nResolution: {scrub(p.answer)}"
+            f"Subject: {p.subject}\nResolution: {scrub(p.answer, language)}"
         )
     return f"PRECEDENTS:\n\n" + "\n\n".join(blocks) + f"\n\n---\n\nINCOMING TICKET:\n{text}"
 
@@ -176,7 +215,7 @@ def _gemini(text: str, language: str, precedents: list[Precedent]) -> dict:
                           http_options={"timeout": config.LLM_TIMEOUT_MS})
     resp = client.models.generate_content(
         model=config.LLM_MODEL,
-        contents=_build_user_prompt(text, precedents),
+        contents=_build_user_prompt(text, precedents, language),
         config={
             "system_instruction": SYSTEM_PROMPT.format(
                 language=LANG_NAME.get(language, "English")),
@@ -187,7 +226,7 @@ def _gemini(text: str, language: str, precedents: list[Precedent]) -> dict:
     )
     payload = json.loads(resp.text)
     return {
-        "reply": scrub(payload.get("reply") or ""),
+        "reply": scrub(payload.get("reply") or "", language),
         "claimed": payload.get("cited_ticket_ids") or [],
         "grounded": bool(payload.get("grounded", True)),
         "unsupported_requests": payload.get("unsupported_requests") or [],
