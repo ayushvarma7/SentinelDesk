@@ -170,7 +170,10 @@ def _gemini(text: str, language: str, precedents: list[Precedent]) -> dict:
 
     from google import genai
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    # Hard deadline: without it an overloaded model hangs the console instead of
+    # falling through to the extractive path.
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"],
+                          http_options={"timeout": config.LLM_TIMEOUT_MS})
     resp = client.models.generate_content(
         model=config.LLM_MODEL,
         contents=_build_user_prompt(text, precedents),

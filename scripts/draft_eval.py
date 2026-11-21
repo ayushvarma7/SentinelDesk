@@ -23,7 +23,7 @@ from sentineldesk.pipeline import _detected_language, triage
 from sentineldesk.text import build_text
 
 N = int(os.getenv("SD_DRAFT_N", "10"))
-WORKERS = int(os.getenv("SD_DRAFT_WORKERS", "8"))
+WORKERS = int(os.getenv("SD_DRAFT_WORKERS", "3"))   # 8 triggers 504s on the capacity-limited model
 PLACEHOLDER = re.compile(r"<[A-Za-z_][A-Za-z_0-9 -]{1,20}>"
                          r"|\[(?!(?:TKT|LIVE)-\d{5}\])[A-Za-z_][A-Za-z_0-9 -]{1,20}\]")
 
