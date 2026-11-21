@@ -289,6 +289,30 @@ with right:
                     st.rerun()
         else:
             st.warning(t["no_draft"])
+            # No AI draft (escalated, blocked, or withdrawn as ungrounded): the agent writes the reply.
+            # A human-written reply is exactly what the learning loop wants, so it becomes a precedent
+            # and the ticket's problem is marked resolved in the problem database.
+            if rec and rec["state"] not in ("Resolved", "Closed"):
+                manual = st.text_area("Your reply to the customer", height=160, key=f"manual_{number}",
+                                      placeholder="Write the resolution the customer should receive")
+                if st.button(t["use"], type="primary", key=f"send_manual_{number}",
+                             disabled=not manual.strip()):
+                    acts = log("Agent wrote the reply, ticket resolved", rec.get("activity", []))
+                    try:
+                        live_id = learn_from_resolution(rec, manual, None, agent="IT service desk")
+                    except Exception as e:  # noqa: BLE001
+                        live_id = None
+                        acts = log(f"Could not add the resolution to the knowledge base: {e}", acts)
+                    if live_id:
+                        acts = log(f"Resolution added to the knowledge base as {live_id}", acts)
+                    try:
+                        pid = close_problem(rec, manual, agent="IT service desk", live_id=live_id)
+                        if pid is not None:
+                            acts = log(f"Problem #{pid} marked resolved in the problem database", acts)
+                    except Exception as e:  # noqa: BLE001
+                        acts = log(f"Could not update the problem database: {e}", acts)
+                    update_ticket(number, state="Resolved", reply=manual, resolved_at=now(), activity=acts)
+                    st.rerun()
         with st.expander(t["evidence"]):
             render_retrieved(res.get("retrieved", []))
 
