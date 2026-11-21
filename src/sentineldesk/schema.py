@@ -42,6 +42,31 @@ class RootCause:
 
 
 @dataclass
+class RelatedProblem:
+    """A problem already in the database that resembles this ticket (store.py)."""
+    problem_id: int
+    title: str
+    similarity: float
+    occurrences: int
+    status: str                            # open | resolved
+    resolution: str | None = None
+
+
+@dataclass
+class ProblemMatch:
+    """This ticket's entry in the problem database (store.py): matched an existing problem or added a new one."""
+    problem_id: int
+    is_new: bool                           # True -> added to the database by this ticket
+    title: str
+    occurrences: int
+    status: str
+    resolution: str | None = None
+    similarity: float = 1.0                # cosine to the matched problem (1.0 when new)
+    related: list[RelatedProblem] = field(default_factory=list)
+    log_id: int | None = None
+
+
+@dataclass
 class TriageResult:
     """Everything the console renders for one incoming ticket."""
     language: str
@@ -74,6 +99,9 @@ class TriageResult:
     # Which path produced the draft: the model name, "extractive-fallback", or
     # None when the ticket was escalated and no draft was written.
     engine: str | None = None
+
+    # Track A: problem database entry (store.py); None when not recorded (evaluation runs).
+    problem: ProblemMatch | None = None
 
     @property
     def overall_confidence(self) -> float:

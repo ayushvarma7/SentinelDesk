@@ -4,8 +4,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sentinel_ui.common import (ON_CALL, backend_sidebar, incident_banner, inject_css, learn_from_resolution,
-                                load_kb, load_live, major_incidents,
+from sentinel_ui.common import (ON_CALL, backend_sidebar, close_problem, incident_banner, inject_css,
+                                learn_from_resolution, load_kb, load_live, major_incidents, render_problem,
                                 render_retrieved, run_triage, status_badge, ticket_priority_label, ticket_type,
                                 update_ticket)
 
@@ -250,8 +250,8 @@ with right:
     if res is None:
         if st.button(t["ask"]):
             try:
-                st.session_state[f"bot_{number}"] = run_triage(
-                    None if summary == "(no subject)" else summary, body)
+                st.session_state[f"bot_{number}"] = run_triage(   # history replay: not recorded
+                    None if summary == "(no subject)" else summary, body, live=False)
                 st.rerun()
             except Exception as e:  # noqa: BLE001
                 st.error(f"Pipeline failed: {type(e).__name__}: {e}")
@@ -267,6 +267,7 @@ with right:
         if rec and rec.get("user_priority"):
             st.caption(f"Customer impact x urgency: {P_MAP.get(rec['user_priority'])} · "
                        f"model: {P_MAP.get(res['priority']['label'])} · ticket: {live_priority(rec)}")
+        render_problem(res.get("problem"))       # problem database: new or known, count, related
         rc = res.get("root_cause") or {}
         if rc.get("suggest_problem"):
             st.info(f"Probable shared root cause across {len(rc['group'])} live issues: raise a Problem record"
@@ -286,12 +287,42 @@ with right:
                         acts = log(f"Could not add the resolution to the knowledge base: {e}", acts)
                     if live_id:
                         acts = log(f"Edited resolution added to the knowledge base as {live_id}", acts)
+                    try:
+                        pid = close_problem(rec, draft, agent="IT service desk", live_id=live_id)
+                        if pid is not None:
+                            acts = log(f"Problem #{pid} marked resolved in the problem database", acts)
+                    except Exception as e:  # noqa: BLE001
+                        acts = log(f"Could not update the problem database: {e}", acts)
                     update_ticket(number, state="Resolved", reply=draft, resolved_at=now(), activity=acts)
                     st.rerun()
         else:
             reasons = res["escalation"]["reasons"]
             st.warning(t["no_draft_oncall"] if res.get("status") == ON_CALL
                        else t["no_draft_held"] if reasons else t["no_draft"])
+            # No AI draft (escalated, blocked, or withdrawn as ungrounded): the agent writes the reply.
+            # A human-written reply is exactly what the learning loop wants, so it becomes a precedent
+            # and the ticket's problem is marked resolved in the problem database.
+            if rec and rec["state"] not in ("Resolved", "Closed"):
+                manual = st.text_area("Your reply to the customer", height=160, key=f"manual_{number}",
+                                      placeholder="Write the resolution the customer should receive")
+                if st.button(t["use"], type="primary", key=f"send_manual_{number}",
+                             disabled=not manual.strip()):
+                    acts = log("Agent wrote the reply, ticket resolved", rec.get("activity", []))
+                    try:
+                        live_id = learn_from_resolution(rec, manual, None, agent="IT service desk")
+                    except Exception as e:  # noqa: BLE001
+                        live_id = None
+                        acts = log(f"Could not add the resolution to the knowledge base: {e}", acts)
+                    if live_id:
+                        acts = log(f"Resolution added to the knowledge base as {live_id}", acts)
+                    try:
+                        pid = close_problem(rec, manual, agent="IT service desk", live_id=live_id)
+                        if pid is not None:
+                            acts = log(f"Problem #{pid} marked resolved in the problem database", acts)
+                    except Exception as e:  # noqa: BLE001
+                        acts = log(f"Could not update the problem database: {e}", acts)
+                    update_ticket(number, state="Resolved", reply=manual, resolved_at=now(), activity=acts)
+                    st.rerun()
         with st.expander(t["evidence"]):
             render_retrieved(res.get("retrieved", []))
 

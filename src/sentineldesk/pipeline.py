@@ -76,7 +76,7 @@ def _stub_precedents() -> list[Precedent]:
 
 def triage(subject: str | None, body: str | None,
            thresholds: dict | None = None, track_burst: bool = True,
-           received_at: float | None = None) -> TriageResult:
+           received_at: float | None = None, record: bool | None = None) -> TriageResult:
     """Triage one ticket. Safe on null subject, null body, and arbitrary length.
 
     track_burst=False keeps the ticket out of the burst detector. Evaluation scripts pass it so
@@ -115,7 +115,7 @@ def triage(subject: str | None, body: str | None,
         from . import retrieve
         if retrieve.is_ready():
             precedents = retrieve.search(qvec, config.TOP_K, preds["queue"].label,
-                                         language=preds["language"].label)
+                                         language=preds["language"].label, query_text=text)
         else:
             precedents = _stub_precedents()   # index not built yet
     else:
@@ -127,11 +127,20 @@ def triage(subject: str | None, body: str | None,
     t = time.perf_counter()
     if qvec is not None and preds["type"].label in config.CRITICAL_TYPES:
         from . import rootcause
-        root_cause = rootcause.analyze(qvec, text, now=received_at, group=track_burst)
+        root_cause = rootcause.analyze(qvec, text, now=received_at, group=track_burst,
+                                       queue=preds["queue"].label)
     latency["root_cause"] = (time.perf_counter() - t) * 1000
 
     burst = (BURST.check(qvec, now=received_at, sim=(thresholds or {}).get("burst_sim")) if track_burst
              else {"active": False, "related": [], "live_id": None, "max_sim": 0.0})
+    if config.MAJOR_INCIDENT_SOURCE == "root_cause" and track_burst:
+        # The banner follows the root-cause group (issues only, queue-aware linking), not P3's
+        # flat-cosine trigger, which fired on unrelated tickets in tests/test_major_incident.py.
+        # P3's detector still records every ticket and reports max_sim for the console.
+        group = root_cause.group_ticket_ids if root_cause is not None else []
+        active = root_cause is not None and root_cause.suggest_problem
+        burst = {**burst, "active": active, "related": group[:-1] if active else [],
+                 "source": "root_cause"}
     detailed = gate.evaluate_detailed(
         text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst,
         root_cause=root_cause
@@ -169,7 +178,7 @@ def triage(subject: str | None, body: str | None,
     latency["generate"] = (time.perf_counter() - t) * 1000
     latency["total"] = (time.perf_counter() - t0) * 1000
 
-    return TriageResult(
+    result = TriageResult(
         language=preds["language"].label,
         type=preds["type"],
         queue=preds["queue"],
@@ -188,6 +197,26 @@ def triage(subject: str | None, body: str | None,
         root_cause=root_cause,
         engine=engine,
     )
+
+    # Track A: log every LIVE triage and match-or-add its problem in the database (store.py).
+    # Evaluation passes track_burst=False and is never recorded. Attacks and empty tickets are
+    # logged but not registered as problems. A database error must never break triage.
+    # record=None -> record live tickets only; record=False lets a caller (e.g. demo seeding) triage
+    # live without writing to the problem database.
+    if (track_burst if record is None else record) and config.DB_ENABLED:
+        try:
+            from . import store
+            hard = set(result.risks) & set(gate.HARD_RISKS)
+            register = qvec is not None and not hard and not gate.too_little_text(text) \
+                and len(text.split()) >= config.ROOT_CAUSE_MIN_WORDS
+            t = time.perf_counter()
+            result.problem = store.record(result, qvec, pii.mask(subject or "")[0], pii.mask(body or "")[0],
+                                          register=register)
+            latency["store"] = (time.perf_counter() - t) * 1000
+        except Exception as e:  # noqa: BLE001
+            latency["store_error"] = 1.0
+            print(f"[store] not recorded: {type(e).__name__}: {e}")
+    return result
 
 
 def resolve_ticket(subject: str | None, body: str | None, resolution: str,
@@ -232,4 +261,13 @@ def resolve_ticket(subject: str | None, body: str | None, resolution: str,
     ticket_id = retrieve.add_precedent(subject=subject, body=body, answer=resolution,
                                        language=language, queue=queue, type_=type_,
                                        resolved_by=resolved_by)
-    return {"ticket_id": ticket_id, "indexed": True, "live_count": retrieve.live_count()}
+    problem_id = None
+    if config.DB_ENABLED and STAGES["embed"]:         # Track A: mark the problem resolved in the database
+        try:
+            from . import embed, store
+            problem_id = store.mark_resolved(embed.encode([build_text(subject, body)], is_query=True)[0],
+                                             resolution, resolved_by, precedent_id=ticket_id)
+        except Exception as e:  # noqa: BLE001
+            print(f"[store] resolution not recorded: {type(e).__name__}: {e}")
+    return {"ticket_id": ticket_id, "indexed": True, "live_count": retrieve.live_count(),
+            "problem_id": problem_id}

@@ -2,6 +2,8 @@
 
     PYTHONPATH=src python scripts/demo_live_kb.py
 """
+import os as _os, tempfile as _tempfile  # keep test/demo tickets out of the real problem database
+_os.environ.setdefault("SD_DB_PATH", _tempfile.mkdtemp(prefix="sd_db_") + "/scratch.db")
 from sentineldesk import config, embed, retrieve
 from sentineldesk.pipeline import resolve_ticket, triage
 from sentineldesk.text import build_text

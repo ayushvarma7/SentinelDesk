@@ -57,9 +57,13 @@ def warm_up() -> None:
     pipeline.triage("warm-up", "warm-up ticket to load the models", track_burst=False)
 
 
-def triage_ticket(subject: str | None, body: str, received_at: float | None = None) -> dict:
-    """received_at (epoch seconds) replays a ticket at its own arrival time (scripts/seed_demo.py)."""
-    r = pipeline.triage(subject, body, received_at=received_at)
+def triage_ticket(subject: str | None, body: str, live: bool = True,
+                  received_at: float | None = None) -> dict:
+    """live=True for a real incoming ticket (counted by the burst detector, root-cause grouping and
+    the problem database). live=False replays a ticket (e.g. an agent asking the AI about a
+    historical KB ticket) without recording it anywhere. received_at (epoch seconds) replays a
+    ticket at its own arrival time (scripts/seed_demo.py)."""
+    r = pipeline.triage(subject, body, track_burst=live, received_at=received_at)
     # Exactly what an external LLM call receives: the pipeline masks this same text before generate.draft().
     masked_text, _ = pii.mask(build_text(subject, body))
     lat = r.latency_ms
@@ -87,6 +91,14 @@ def triage_ticket(subject: str | None, body: str, received_at: float | None = No
             "known_problem": rc.known_problem.ticket_id if rc.known_problem else None,
             "known_change": rc.known_change.ticket_id if rc.known_change else None},
         "engine": r.engine,
+        # Track A problem database (store.py): matched an existing problem or added a new one
+        "problem": None if r.problem is None else {
+            "problem_id": r.problem.problem_id, "is_new": r.problem.is_new, "title": r.problem.title,
+            "occurrences": r.problem.occurrences, "status": r.problem.status,
+            "resolution": r.problem.resolution, "similarity": r.problem.similarity,
+            "related": [{"problem_id": x.problem_id, "title": x.title, "similarity": x.similarity,
+                         "occurrences": x.occurrences, "status": x.status} for x in r.problem.related],
+            "log_id": r.problem.log_id},
         "latency_ms": {"triage": round(lat.get("embed", 0) + lat.get("classify", 0), 1),
                        "retrieval": round(lat.get("retrieve", 0), 1),
                        "generation": round(lat.get("generate", 0), 1),

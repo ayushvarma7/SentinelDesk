@@ -4,6 +4,7 @@ Announce changes to the team — every track imports this.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,7 +46,27 @@ CRITICAL_SCORE_MIN = 0.10   # was 0.20: 0.9276 of high-priority Incidents escala
                             # auto-drafts is unchanged (0.753 -> 0.756). n=995, not a 41-row sample.
 # Similarity (e5 query vectors) above which two issues are treated as the same root cause.
 # Calibrated on KB issue pairs from different queues with no shared tag: p90=0.891, p99=0.917.
-ROOT_CAUSE_GROUP_SIM = 0.89
+# 0.88: tests/test_major_incident.py (4 core problems EN+DE, 5 one-offs) gives grouping and
+# banner precision 1.00 with no premature banner, and P3's attack-table burst case passes
+# (its German VPN report scores 0.884). 0.885+ misses that report; P3's flat 0.86 burst had
+# banner precision 0.16 and raised 4 banners before a 3rd report of the same problem.
+ROOT_CAUSE_GROUP_SIM = 0.88
+# Optional lower bar when both issues share a predicted queue. DISABLED (None): it merged Outlook,
+# VPN and printer outages into one group, because the classifier puts all three in the same IT queue
+# and single linkage chains them. (A KB check had looked fine only because it defined "unrelated"
+# as different queues, exactly where this rule never applies.)
+ROOT_CAUSE_GROUP_SIM_SAME_QUEUE = None
+# What raises the major-incident banner: "root_cause" (grouping above, 3+ issues) or "burst"
+# (P3's burst.py: direct cosine >= BURST_SIM to 2 earlier tickets of any type).
+MAJOR_INCIDENT_SOURCE = "root_cause"
+
+# --- problem database (Track A, store.py) -------------------------------------------
+# SQLite log of every live triage + registry of distinct problems. Git-ignored (artifacts/).
+DB_PATH = Path(os.getenv("SD_DB_PATH", str(ARTIFACTS / "sentineldesk.db")))
+DB_ENABLED = os.getenv("SD_DB", "1") == "1"
+PROBLEM_MATCH_SIM = ROOT_CAUSE_GROUP_SIM     # same problem (precision 1.00 in tests/test_major_incident.py)
+PROBLEM_RELATED_MIN_SIM = 0.80               # also show stored problems at least this similar
+PROBLEM_RELATED_K = 3
 ROOT_CAUSE_MIN_GROUP = 3             # this many similar live issues -> suggest raising a Problem
 ROOT_CAUSE_WINDOW_MIN = 30           # live issues older than this drop out of grouping
 ROOT_CAUSE_MIN_WORDS = 3             # too-short tickets ("help", emoji) are never grouped
@@ -60,7 +81,7 @@ KB_META_PATH = ARTIFACTS / "kb_meta.parquet"         # same row order as KB_EMB_
 
 # Live store: precedents added during a session (see retrieve.add_precedent).
 # Separate from the frozen index on purpose — evaluation passes include_live=False.
-LIVE_DIR = ARTIFACTS / "live"
+LIVE_DIR = Path(os.getenv("SD_LIVE_DIR", str(ARTIFACTS / "live")))   # SD_LIVE_DIR: isolate tests
 LIVE_EMB_PATH = LIVE_DIR / "live_embeddings.npy"
 LIVE_META_PATH = LIVE_DIR / "live_meta.parquet"
 TOP_K = 5
@@ -70,6 +91,12 @@ DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already
 # not bridge languages on its own: by DETECTED language only 1-3% of hits cross
 # over. 0 disables; evaluation passes 0 so metrics measure unaided retrieval.
 CROSS_LINGUAL_SLOTS = 1
+
+# Hybrid search (Track A): weight of the keyword (TF-IDF cosine) ranking in reciprocal-rank fusion
+# with the e5 ranking. 0 = dense only. Displayed scores and gate floors stay e5 cosine.
+# Chosen by scripts/hybrid_check.py on the KB validation slice.
+HYBRID_LEXICAL_WEIGHT = 0.0
+KB_LEX_PATH = ARTIFACTS / "kb_tfidf.npz"            # keyword index, row-aligned with KB_META_PATH
 
 # --- escalation gate --------------------------------------------------------
 # EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is

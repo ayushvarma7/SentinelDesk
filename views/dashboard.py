@@ -1,3 +1,4 @@
+import json
 import altair as alt
 import numpy as np
 import pandas as pd
@@ -123,8 +124,8 @@ def live_operations():
                                        d["language"].value_counts(normalize=True).items()))
 
 
-tab_live, tab_hist, tab_model = st.tabs(["Live operations", "Ticket history (knowledge base)",
-                                         "Model performance (holdout)"])
+tab_live, tab_hist, tab_model, tab_db = st.tabs(["Live operations", "Ticket history (knowledge base)",
+                                                 "Model performance (holdout)", "Problem database"])
 with tab_live:
     live_operations()
 
@@ -236,4 +237,79 @@ with tab_model:
                         x=alt.X("predicted:N", sort=labels), y=alt.Y("actual:N", sort=labels),
                         text="n:Q")).properties(height=320),
                     use_container_width=True)
+
+with tab_model:
+    # ------------------------------------------------------------------ deeper model numbers (Track A)
+    if m:
+        pipe = m.get("pipeline") or {}
+        st.subheader("Language, escalation gate and retrieval")
+
+        c = st.columns(4)
+        lang_f1 = (m.get("language") or {}).get("macro_f1")
+        c[0].metric("Language Macro-F1", f"{lang_f1:.3f}" if lang_f1 is not None else "n/a",
+                    help="Language is detected from the raw text; the reply is written in that language.")
+        clf_rec = m.get("high_incident_recall_classifier")
+        c[1].metric("High-priority incidents flagged high", f"{clf_rec:.1%}" if clf_rec is not None else "n/a",
+                    help="Classifier only: share of true high-priority Incidents predicted as high priority "
+                         f"(n={m.get('high_incident_support', '?')}).")
+        gate_rec = pipe.get("high_incident_escalated_by_gate")
+        c[2].metric("High-priority incidents kept from auto-draft", f"{gate_rec:.1%}" if gate_rec is not None else "n/a",
+                    help=f"Full gate on a {pipe.get('n_sampled', '?')}-ticket holdout sample.")
+        lat50 = (m.get("latency_ms") or {}).get("p50_drafted")
+        c[3].metric("Median latency, drafted ticket", f"{lat50:,.0f} ms" if lat50 is not None else "n/a")
+
+        shares = pipe.get("status_share") or {}
+        if shares:
+            st.markdown("**What the gate decides** (holdout sample)")
+            c = st.columns(4)
+            c[0].metric("Auto-draft ready", f"{shares.get('AUTO_DRAFT_READY', 0):.0%}")
+            c[1].metric("Human review", f"{shares.get('HUMAN_REVIEW', 0):.0%}")
+            c[2].metric("Escalate to on-call", f"{shares.get('ESCALATE_ONCALL', 0):.0%}")
+            c[3].metric("Operator gets a draft", f"{pipe.get('draft_share', 0):.0%}",
+                        help="Auto-draft tickets plus review tickets whose only reasons are soft.")
+
+        if pipe:
+            st.markdown("**Retrieval (RAG)**")
+            c = st.columns(3)
+            c[0].metric("Top precedent, same team", f"{pipe.get('top1_same_queue', 0):.0%}")
+            c[1].metric("Median top-1 cosine similarity", f"{pipe.get('median_top1_similarity', 0):.3f}")
+            c[2].metric("Other-language precedent (unaided)", f"{pipe.get('cross_lingual_share_unaided', 0):.0%}",
+                        help="Share of tickets whose plain top-5 already includes a precedent in the other "
+                             "language; one slot is also reserved for it.")
+
+        per = m.get("per_language") or {}
+        if per:
+            st.markdown("**English vs German** (Macro-F1 on the holdout)")
+            rows = [{"Language": {"en": "English", "de": "German"}[lg], "Tickets": v.get("n"),
+                     "Type": v.get("type"), "Queue": v.get("queue"), "Priority": v.get("priority")}
+                    for lg, v in per.items()]
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            try:
+                agree = json.loads((METRICS_PATH.parent / "german_experiments.json").read_text())["neighbour_label_agreement"]
+                st.caption(f"Why German is lower: a German ticket's nearest German neighbour carries the same queue "
+                           f"label only {agree['de']['queue']:.0%} of the time (English {agree['en']['queue']:.0%}), "
+                           f"so the German labels themselves are less consistent.")
+            except (OSError, KeyError, ValueError):
+                pass
+
+with tab_db:
+    # ------------------------------------------------------------------ problem database (Track A)
+    try:
+        from sentineldesk import store as _store
+        _s = _store.stats()
+    except Exception as _e:  # noqa: BLE001
+        _s = None
+    if not _s or not _s["tickets_logged"]:
+        st.info("No live tickets recorded yet. Every ticket triaged in the console is logged here, and "
+                "problems not seen before are added automatically.")
+    else:
+        c = st.columns(5)
+        c[0].metric("Tickets logged", f"{_s['tickets_logged']:,}")
+        c[1].metric("Distinct problems", f"{_s['problems']:,}")
+        c[2].metric("Recurring problems", f"{_s['recurring_problems']:,}", help="Reported more than once.")
+        c[3].metric("Open", f"{_s['open_problems']:,}")
+        c[4].metric("Resolved", f"{_s['resolved_problems']:,}")
+        t1, t2 = st.tabs(["Problems", "Triage log"])
+        t1.dataframe(pd.DataFrame(_store.problems()), hide_index=True, use_container_width=True)
+        t2.dataframe(pd.DataFrame(_store.recent_logs()), hide_index=True, use_container_width=True)
 

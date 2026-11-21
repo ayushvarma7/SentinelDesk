@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #0B1F3A;
+  --color-navy-2: #132C50;
+  --color-navy-3: #1E3A66;
+  --color-coral: #F0584A;
+  --color-coral-dark: #D9443A;
+  --color-coral-soft: #FDECEA;
+  --color-canvas: #F3F5F9;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html, body, #root { min-height: 100%; }
+body { background: var(--color-canvas); color: #0f172a; -webkit-font-smoothing: antialiased; }
+
+/* Long unbroken input (10k chars, URLs) must never overflow a card. */
+.wrap-any { overflow-wrap: anywhere; word-break: break-word; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.fade-up { animation: fadeUp .3s ease-out both; }

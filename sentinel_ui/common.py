@@ -183,7 +183,7 @@ def inject_css():
         .link-card{display:flex;flex-direction:column}
         .link-card .cd{flex:1}
         .link-card a.go{align-self:flex-start;margin-top:1.1rem;background:var(--nu-red);color:#FFFFFF!important;
-            text-decoration:none!important;font-weight:700;font-size:.92rem;padding:.55rem 1rem;border-radius:6px;
+            text-decoration:none!important;font-weight:700;font-size:.92rem;padding:.55rem 1rem;border-radius:6px;white-space:nowrap;
             transition:background .15s ease}
         .link-card a.go:hover{background:var(--nu-red-dark)}
         .step .n{font-size:.78rem;font-weight:900;color:var(--nu-red);letter-spacing:.1em;text-transform:uppercase}
@@ -391,6 +391,7 @@ def normalize_result(r: dict) -> dict:
         "risks": list(r.get("risks", [])),
         "burst": r.get("burst") or {},
         "root_cause": r.get("root_cause"),
+        "problem": r.get("problem"),             # problem database entry (Track A, store.py)
         "engine": r.get("engine"),
         "unverified": list(r.get("unverified", [])),
         "language": r.get("language", "?"),
@@ -408,17 +409,36 @@ def normalize_result(r: dict) -> dict:
     }
 
 
-def run_triage(subject: str | None, body: str) -> dict:
-    """Validate input, call the pipeline, and return a normalized result (raises on bad input)."""
+def run_triage(subject: str | None, body: str, live: bool = True) -> dict:
+    """Validate input, call the pipeline, and return a normalized result (raises on bad input).
+
+    live=False: replay without recording (no burst, no root-cause grouping, no problem database)."""
     body = (body or "").strip()
     if not any(ch.isalnum() for ch in body):
         raise ValueError("empty")
     body = body[:MAX_CHARS]
     fn, _ = get_backend()
     t0 = datetime.now()
-    res = normalize_result(fn((subject or "").strip() or None, body))
+    try:
+        raw = fn((subject or "").strip() or None, body, live=live)
+    except TypeError:                      # mock / older backends take no live flag
+        raw = fn((subject or "").strip() or None, body)
+    res = normalize_result(raw)
     res["wall_ms"] = round((datetime.now() - t0).total_seconds() * 1000, 1)
     return res
+
+
+def close_problem(rec: dict, reply: str, agent: str, live_id: str | None = None) -> int | None:
+    """Ticket resolved in the console: mark its problem resolved in the problem database (store.py).
+
+    Unlike the precedent store, this also records an approved AI draft: the problem IS resolved, and
+    the record says who approved what. Returns the problem_id, or None (mock backend / no problem)."""
+    pid = ((rec.get("triage") or {}).get("problem") or {}).get("problem_id")
+    if pid is None or not (reply or "").strip() or "mock" in get_backend()[1]:
+        return None
+    from sentineldesk import store
+    store.resolve_problem(pid, reply, agent, precedent_id=live_id)
+    return pid
 
 
 def reset_outage_detector() -> None:
@@ -578,8 +598,14 @@ def load_metrics() -> dict | None:
         "n_test": m["n_holdout"],
         **{h: m[h] for h in ("type", "queue", "priority", "language") if h in m},
         "high_priority_incident_recall": hi.get("recall_gate_hard_rule", hi.get("recall_predicted_high")),
-        "latency_ms": {"p50": pipe.get("latency_ms_p50_all"), "p95": pipe.get("latency_ms_p95_all")},
+        "latency_ms": {"p50": pipe.get("latency_ms_p50_all"), "p95": pipe.get("latency_ms_p95_all"),
+                       "p50_drafted": pipe.get("latency_ms_p50_drafted")},
         "confusion": m.get("confusion") or {},
+        # extra real numbers from scripts/evaluate.py (Track A)
+        "high_incident_recall_classifier": hi.get("recall_predicted_high"),
+        "high_incident_support": hi.get("support"),
+        "per_language": m.get("per_language") or {},
+        "pipeline": pipe,
     }
 
 
@@ -702,6 +728,7 @@ def render_triage(res: dict, show_draft: bool = True, draft_key: str = "draft"):
                 delta=f"triage {lat.get('triage', 0):,.0f} · retrieval {lat.get('retrieval', 0):,.0f} · "
                       f"draft {lat.get('generation', 0):,.0f} ms" if lat else None)
     render_pii(res)
+    render_problem(res.get("problem"))
 
     left, right = st.columns(2)
     if show_draft:
@@ -723,6 +750,25 @@ def render_triage(res: dict, show_draft: bool = True, draft_key: str = "draft"):
     with (right if show_draft else left):
         st.markdown("#### Top retrieved past tickets")
         render_retrieved(res.get("retrieved", []))
+
+
+def render_problem(p: dict | None):
+    """Where this ticket sits in the problem database (Track A, store.py)."""
+    if not p:
+        return
+    if p["is_new"]:
+        badge("warn", f"New problem: added to the problem database as #{p['problem_id']}")
+    else:
+        state = "resolved" if p["status"] == "resolved" else "still open"
+        badge("esc" if p["occurrences"] >= 3 and p["status"] != "resolved" else "ok",
+              f"Known problem #{p['problem_id']} ({state}), reported {p['occurrences']} times. "
+              f"Closest match {p['similarity']:.2f}")
+        if p.get("resolution"):
+            st.caption(f"Earlier resolution: {p['resolution'][:300]}")
+    if p.get("related"):
+        st.caption("Most related problems already in the database: " + "; ".join(
+            f"#{x['problem_id']} {x['title'][:50]} ({x['similarity']:.2f}, {x['occurrences']}x, {x['status']})"
+            for x in p["related"]))
 
 
 def render_retrieved(items: list[dict]):

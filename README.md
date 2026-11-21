@@ -1,224 +1,173 @@
 # SentinelDesk
 
-**Autonomous incident triage and grounded resolution copilot.** For each support ticket (subject + body, English or German),
-SentinelDesk does four things:
+**AI incident triage and grounded reply copilot for an IT service desk, in English and German.**
 
-1. **Triage:** predicts `type`, `queue`, `priority` and `language`, each with a confidence.
-2. **Escalation gate:** decides with deterministic, explainable rules whether the ticket gets an AI draft or goes to a human.
-3. **Precedent retrieval:** finds the most similar resolved tickets, across both languages.
-4. **Grounded reply:** drafts a reply in the customer's language that cites those tickets and invents nothing.
+Help desks fail in two ways: urgent outages sit in the same inbox as routine questions, and AI auto-replies
+invent refunds, SLAs and fixes nobody promised. For every incoming ticket, SentinelDesk:
 
-Data: `Tobi-Bueck/customer-support-tickets`, file `aa_dataset-tickets-multi-lang-5-2-50-version.csv`
-(28,587 tickets, EN 57% / DE 43%), with the official seed-42 80/20 split.
+1. **Triages it:** predicts type, team (queue) and priority, each with a confidence score.
+2. **Gates it:** deterministic rules decide between auto-draft, human review and the on-call engineer, and say why.
+3. **Finds precedents:** retrieves the most similar resolved tickets, across both languages.
+4. **Drafts a grounded reply** in the customer's language that cites those tickets and invents nothing.
 
-## Layout
+It also detects outages (a burst of similar tickets raises a Major Incident banner) and masks personal data before
+any text reaches the LLM.
 
-```
-src/sentineldesk/        the package (import with PYTHONPATH=src)
-  schema.py              interface contract: Prediction, Precedent, TriageResult
-  pipeline.py            triage(subject, body) -> TriageResult; STAGES flags switch stubs to real stages
-  config.py              paths, model names, thresholds (shared; announce changes)
-  data.py, text.py       data access (leakage-safe) and build_text()
-  embed.py               e5 encoder with query:/passage: prefixes          [Track B]
-  classify.py            triage heads                                       [Track A, done]
-  rootcause.py           ITIL root-cause grouping + known Problem/Change    [Track A, done]
-  retrieve.py            KB index + search                                  [Track B, todo]
-  generate.py            grounded draft + citation verification             [Track C, todo]
-  gate.py, pii.py        escalation rules + risk regexes, PII masking with dataset tokens  [P3, done]
-  burst.py               major-incident (burst) detector                                  [P3, done]
-scripts/
-  prepare_data.py        writes data/processed/{kb_train,test_inputs,test_labels}.parquet
-  train_classifier.py    trains the triage heads, tunes the P(high) threshold
-  evaluate.py            holdout metrics (the only reader of test labels)
-  gate_sweep.py          tunes gate thresholds on the KB validation slice                [P3]
-  attack_table.py        25 attacks + burst scenario through the real pipeline           [P3]
-tests/test_contract.py   edge cases that must never crash
-tests/test_rootcause.py  root-cause grouping and KB linking
-tests/test_gate.py       pure gate / PII / burst tests                                   [P3]
-tests/test_adversarial.py  25 adversarial tickets (EN + DE)                              [P3]
-notebooks/01_eda.ipynb   EDA (KB split only)
-docs/p1_workdone.md      Track A results + takeover guide for retrieval/generation
-docs/p3_workdone.md      safety gate results, thresholds, attack table, Q&A prep
-```
+![Overview](docs/screenshots/overview.jpg)
 
 ## Quick start
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# put aa_dataset-tickets-multi-lang-5-2-50-version.csv in data/raw/
-python scripts/prepare_data.py
-PYTHONPATH=src python scripts/train_classifier.py   # ~1 min, plus 3-5 min the first time to encode the KB
-PYTHONPATH=src python scripts/evaluate.py           # holdout metrics -> reports/triage_metrics.json
-PYTHONPATH=src python -m pytest -q tests/           # contract + gate + adversarial
-PYTHONPATH=src python scripts/attack_table.py      # -> reports/attack_table.md
-```
-
-### Console (Streamlit)
+Needs Python 3.12, about 2 GB of disk space, and around 10 minutes the first time.
 
 ```bash
-PYTHONPATH=src python scripts/build_kb_index.py     # once: the retrieval index the console needs
-streamlit run app.py                                # http://localhost:8501
+git clone https://github.com/ayushvarma7/SentinelDesk.git && cd SentinelDesk
+./run.sh setup     # venv, dependencies, dataset, 80/20 split, classifier, retrieval index
+./run.sh demo      # a realistic week of tickets, then the console on http://localhost:8501
 ```
 
-- **Customer portal** (`/customer`): users file **Incidents** or **Requests** only. Problems and Changes are raised
-  by the organisation from incidents.
-  - Every submission runs through the real pipeline (`sentinel_ui/backend.py`) and is stored in
-    `data/live_tickets.json` as `INC…` / `REQ…`.
-  - The form's choice is the ticket type of record; the model's type is shown as the AI's opinion.
-  - Priority: incidents take the more urgent of the model and the form's impact × urgency matrix, and a ticket the
-    gate sends to on-call is always P1.
-  - Assignment: on-call engineer for `ESCALATE_ONCALL`, otherwise the predicted queue's group.
-- **Organisation** (`/agent`): ticket list, ticket form with SLA timer, the gate's three-tier status, and the AI draft.
-- **Dashboard** (`/dashboard`): volume charts and the holdout metrics from `reports/triage_metrics.json`.
-- Tick "Use mock backend" in the Organisation sidebar to run without models.
+Optional: put a Gemini key in `.env` for LLM drafts (`cp .env.example .env`). Without it, drafts quote the closest
+past resolution instead, and everything else works the same.
 
-#### Sign in
-
-1. Open http://localhost:8501 and click **Customer portal** in the left sidebar.
-2. Optional: pick **English** or **Deutsch** at the top right. The whole portal switches language.
-3. Sign in with a demo account. These are demo accounts in `sentinel_ui/common.py` (`DEMO_USERS`), not real
-   Northeastern authentication:
-
-   | Email | Password |
-   |---|---|
-   | `demo@northeastern.edu` | `demo` |
-   | `nima@northeastern.edu` | `husky2026` |
-   | `prof@northeastern.edu` | `demo` |
-
-4. You land on "Hi <name>, how can we help today?". The pill under it shows service status; it turns red when
-   several urgent incidents arrive within an hour.
-
-#### Report an incident (something is broken)
-
-1. Open the **Report an incident** tab. A **Popular services** tile pre-selects the service.
-2. Fill in:
-   - **What isn't working?**: the service, e.g. *VPN or campus network*.
-   - **Who is affected?**: *Just me*, *My class or team*, or *A whole department or building* (impact).
-   - **How urgent is it for you?**: *Low*, *Medium* or *High* (urgency).
-   - **Short summary**: optional.
-   - **Describe it in your own words**: required, in English or German.
-3. Click **Submit incident**. The ticket goes through the full pipeline (a few seconds for the first ticket while
-   the models load) and you get a number like `INC0000001`:
-   - **Red badge, "went straight to the on-call team"**: the gate escalated it (`ESCALATE_ONCALL`). The ticket is
-     P1 and assigned to the on-call engineer.
-   - **Green badge, "Your ticket is with the <team> team"**: it was routed to the predicted queue. If the gate
-     found good precedents, similar solved issues are listed underneath.
-
-#### Request something (a service or information)
-
-1. Open the **Request something** tab.
-2. Pick **What do you need?** (account, software, billing, product information, something else), add a summary,
-   and describe the request.
-3. Click **Submit request**. You get a number like `REQ0000001` and the team it was routed to.
-
-#### Track and work tickets
-
-- **My tickets** (portal tab): your tickets with number, opened time, team and status.
-- **Organisation** (sidebar): the service-desk view.
-  1. Portal tickets are listed first, then the history.
-  2. Click a row to open it. You get the customer's message, the ticket form (state, priority P1–P3, assignment
-     group) with **Save changes**, and the SLA timer: P1 4 h, P2 8 h, P3 24 h.
-  3. The **AI assistant** panel shows the gate's status and reasons, the AI's type and priority next to the
-     customer's own, and the drafted reply with the past tickets it cites.
-  4. **Send this reply and resolve** closes the ticket with that reply.
-- **Dashboard** (sidebar): volume by team, priority and type, plus the holdout model metrics; portal tickets are
-  included when the toggle is on.
-- **Start clean:** portal tickets live in `data/live_tickets.json` (gitignored). Delete that file to reset the demo.
-
-## Pipeline status
-
-| Stage | Status |
+| Command | What it does |
 |---|---|
-| PII masking, escalation gate, burst | live: thresholds tuned on the KB validation slice, 26/26 attack table ([docs/p3_workdone.md](docs/p3_workdone.md)) |
-| Embed | live: `multilingual-e5-small`, about 11 ms per ticket after warm-up |
-| Classify | live: frozen model, metrics below |
-| Retrieve | live: exact cosine over the e5 passage index, cross-lingual slot, live precedent store |
-| Generate | live: Gemini with citation/figure verification; extractive fallback without a key |
-| Root cause | live: groups similar live issues (suggests a Problem at 3+), links known KB Problems/Changes |
+| `./run.sh setup` | Creates `.venv`, installs `requirements.txt`, downloads the dataset from Hugging Face, makes the official seed-42 split, trains the classifier, builds the retrieval index. Skips steps that are already done (`FORCE=1` redoes them). |
+| `./run.sh test` | Contract, gate, adversarial, root-cause and status tests. |
+| `./run.sh eval` | Holdout metrics, attack table, retrieval check and draft quality, all written to `reports/`. |
+| `./run.sh seed` | Replays a week of portal tickets through the real pipeline, including VPN, Outlook and Canvas outages. |
+| `./run.sh app` | Starts the console. |
+| `./run.sh demo` | Runs `seed`, then `app`. Run it right before presenting, so the Canvas outage is live. |
 
-## Triage model
+## How to use it
 
-- **Features:** word TF-IDF (1–2 grams) next to the ticket's e5 query embedding.
-- **Heads:** one `LogisticRegression(C=32, class_weight="balanced")` per head.
-- **Priority rule:** priority is labelled `high` whenever P(high) ≥ 0.25. The threshold was tuned on a KB validation slice to catch
-  at least 80% of high-priority tickets, which feed the escalation gate.
-- **Model selection:** every setting was chosen on that validation slice (10 runs; table in
-  [docs/p1_workdone.md](docs/p1_workdone.md#4-results)).
+### Sign in
 
-### Holdout metrics (5,718 tickets, never used for selection)
+Open **Customer portal** in the sidebar and sign in with a demo account. These are demo accounts in
+`sentinel_ui/common.py`, not real Northeastern logins.
 
-| Metric | TF-IDF baseline | **Final model** |
+| Email | Password |
+|---|---|
+| `varma.ay@northeastern.edu` | `ayush` |
+| `gupta.kunal@northeastern.edu` | `kunal` |
+| `demo@northeastern.edu` | `demo` |
+
+![Sign in](docs/screenshots/portal-sign-in.jpg)
+
+### Raise a ticket (Customer portal)
+
+Users can file only **Incidents** (something is broken) or **Requests** (I need something). Problems and Changes are
+raised by IT from incidents.
+
+1. **Report an incident:** pick the service (or click a tile), who is affected, how urgent it is, then describe it
+   in English or German. **Request something:** pick a category and describe it.
+2. Submit. You get a number like `INC0000045`, plus either "sent to the on-call team" or the team it was routed to.
+3. **My tickets** lists your tickets and their status. The pill in the banner turns red during an outage.
+
+![Report an incident](docs/screenshots/portal-report-incident.jpg)
+
+### Inspect any ticket (Live triage)
+
+This is the page for judges and operators. Paste any ticket, or pick one of 15 samples (outage, German billing,
+prompt injection, GDPR deletion, PII, emoji-only…). The subject is optional. One click shows:
+
+- type, queue and priority with confidence, the detected language, and end-to-end latency with a breakdown;
+- the gate's badge: **Auto-draft ready**, **Needs human review** or **Escalate to on-call engineer**, with every reason;
+- what the PII guardrail masked, and the exact text the LLM receives;
+- the top-5 retrieved tickets (ticket ID, similarity, historical answer) and the cited draft.
+
+![Auto-draft](docs/screenshots/live-triage-auto-draft.jpg)
+![Escalation with PII masked](docs/screenshots/live-triage-escalation-pii.jpg)
+
+**Outage drill:** "Simulate an outage burst" sends three reports of one VPN failure (English, English, German) and an
+unrelated invoice question. The third VPN report raises the Major Incident banner; the invoice does not.
+
+![Outage drill](docs/screenshots/outage-drill.jpg)
+
+### Work the queue (Organisation)
+
+The service-desk view: every portal ticket with its priority (P1–P3), state and team, and a red banner while a major
+incident is in progress. Open a ticket to change its state, priority or team. The SLA timer runs on the priority
+(P1 4 h, P2 8 h, P3 24 h). The AI assistant shows the gate's decision and the draft. **Send this reply and resolve**
+closes the ticket, and an edited reply becomes a precedent future tickets can cite.
+
+![Organisation](docs/screenshots/organisation-major-incident.jpg)
+![Ticket and AI assistant](docs/screenshots/organisation-ticket.jpg)
+
+### See the patterns (Dashboard)
+
+- **Live operations:** gate outcomes, SLA breaches, detected major incidents, arrivals per hour (outage spikes in red),
+  routing by team, and who files what.
+- **Ticket history:** the knowledge base by team, type, priority and language.
+- **Model performance:** the holdout metrics below.
+
+![Dashboard](docs/screenshots/dashboard-live-operations.jpg)
+
+## How it works
+
+```
+subject + body
+  │
+  ├─ PII guardrail ──── emails, phones, IPs, IBANs, cards, account numbers → <email> <tel_num> <acc_num> …
+  ├─ Embed ──────────── multilingual-e5-small, "query:" prefix
+  ├─ Classify ───────── word TF-IDF ‖ e5 embedding → LogisticRegression per head (type, queue, priority, language)
+  ├─ Retrieve ───────── cosine over the 22,863-ticket KB index, top 5, one slot reserved for the other language
+  ├─ Burst / root cause  ≥3 similar tickets in 30 min → Major Incident; similar live issues → raise a Problem
+  ├─ Gate ───────────── deterministic rules → AUTO_DRAFT_READY | HUMAN_REVIEW | ESCALATE_ONCALL + reasons
+  └─ Draft ──────────── Gemini on the masked text, JSON with cited IDs, then verified in code
+                        (no key or a failure → extractive fallback that quotes the closest precedent)
+```
+
+| Stage | How | Why |
 |---|---|---|
-| Type macro-F1 | 0.8747 | **0.8777** |
-| Queue macro-F1 | 0.5718 | **0.6109** |
-| Priority macro-F1 | 0.5974 | **0.6195** |
-| Language macro-F1 | n/a | **0.9666** |
-| ECE type / queue / priority / language | 0.050 / 0.144 / 0.039 / n/a | 0.028 / 0.012 / 0.082 / 0.003 |
-| High-priority Incident recall: predicted high (n=995) | 0.8563 | 0.8523 |
-| High-priority Incident recall: predicted high **and** Incident | 0.7658 | **0.7729** |
-| High-priority Incident recall: gate hard rule (high + Incident **or Problem**) | n/a | **0.8503** (escalates 34% of tickets) |
-| High-priority Incident recall: full gate | pending (needs retrieval + generation) | |
-| Latency p50 / p95 | pending | |
+| Triage | TF-IDF (1–2 grams) next to the e5 embedding; one `LogisticRegression(C=32, class_weight="balanced")` per head. Priority is `high` when P(high) ≥ 0.25. | Calibrated probabilities that the gate can threshold, about 20 ms per ticket, minutes to train. The 0.25 threshold trades a little macro-F1 for catching urgent tickets. |
+| Retrieval | Exact cosine in numpy over e5 `passage:` vectors; a queue filter only when it leaves enough candidates; near-duplicate answers dropped. | 1 ms per query and no faiss/torch clash on macOS. e5 does not bridge languages on its own, so one slot is reserved for the best other-language precedent. |
+| Gate | On-call: high priority + Incident/Problem, P(high) × P(Incident/Problem) ≥ 0.20, outage + urgency words, a burst, a shared root cause. Human review without a draft: prompt injection, credential requests, destructive bulk actions, legal threats, refunds no precedent supports, empty text. Human review with a draft: queue confidence < 0.50, best precedent < 0.865, mean top-3 < 0.845. | Every rule is explainable in one line on the badge. No LLM decides escalation. Thresholds were tuned on a KB validation slice, never the holdout. |
+| Draft | The prompt fences the ticket as untrusted data. Code then checks that every cited ID was retrieved and that every figure (%, currency, time) appears in a precedent; an ungrounded draft escalates. | The prompt alone is not the guarantee; the code checks are. |
+| Learning loop | An agent-edited resolution becomes a `LIVE-…` precedent immediately; unedited AI drafts are never indexed. | Answers grow with use without the system learning from its own output. |
 
-Priority ECE rises because the recall-oriented threshold labels tickets with P(high) as low as 0.25 as `high`.
-The trade is deliberate: a missed outage costs more than a false alarm.
+## Results
 
-## Safety gate
+**Holdout:** 5,718 unseen tickets from the official 20% split, never used to choose any setting (`./run.sh eval`).
 
-Deterministic rules, no LLM in the decision path. Every escalation reason is a sentence shown on the badge.
-
-| Rule | Action |
+| Metric | Value |
 |---|---|
-| Prompt injection, credential request, destructive bulk action, legal threat (EN + DE regexes) | Always escalate; injections never reach the LLM |
-| High priority + Incident **or Problem** (`CRITICAL_TYPES`, Track A) | Escalate to on-call |
-| 3+ similar tickets within 30 min (multilingual, `BURST_SIM=0.86`) | Major-incident banner + escalate |
-| Outage words + urgency words (e.g. "keeps dropping" + "immediately") | Escalate to on-call |
-| Any head below its confidence floor (type 0.75, queue 0.50, priority 0.70) | Human review |
-| Best precedent < 0.865 or mean top-3 < 0.845 (calibrated on hand-typed tickets) | Human review (no precedent) |
-| Refund / compensation request with no precedent that mentions it | Human review |
-| Empty, emoji-only or bare-URL ticket | Human review |
+| Macro-F1: type / queue / priority / language | **0.878 / 0.611 / 0.620 / 0.967** |
+| Calibration (ECE): type / queue / priority | 0.028 / 0.012 / 0.082 |
+| High-priority Incident recall (n = 995): predicted high | **0.852** |
+| High-priority Incident recall: escalated by the gate's hard rule | 0.850 |
+| Full pipeline (200 holdout tickets): high-priority Incidents escalated | **0.902** |
+| Full pipeline: auto-drafted share / latency p50 / p95 | 39.5% / 180 ms / 1.2 s |
+| Drafts: cite a real ticket / fake citations / invented figures / placeholder leaks | 100% / 0 / 0 / 0 |
+| Drafts: in the language the customer wrote in | 100% |
+| Attack table (26 adversarial and look-alike tickets + the burst scenario) | **27/27** |
 
-Thresholds were chosen by `scripts/gate_sweep.py` on the 2,286-ticket KB validation slice, using a rule fixed in
-advance (≥95% of high-priority Incidents escalated, ≥25% auto-drafted, then the best queue accuracy on auto-drafted
-tickets).
+The queue is the hard head: 10 classes, 21× imbalance, and overlapping teams (Technical, Product and IT Support).
+Priority uses a recall-oriented threshold on purpose, because a missed outage costs more than a false alarm.
 
-- **25.2%** of tickets are auto-drafted.
-- **97.0%** of high-priority Incidents are escalated.
-- Queue accuracy on auto-drafted tickets is **0.815**, against 0.609 on all tickets.
+## Data and leakage
 
-PII is masked with the dataset's own tokens (`<email>`, `<tel_num>`, `<acc_num>`) before any external call.
-Attack table: `reports/attack_table.md` (26/26).
+- **Dataset:** `Tobi-Bueck/customer-support-tickets`, file `aa_dataset-tickets-multi-lang-5-2-50-version.csv`
+  (28,587 tickets; English 57%, German 43%), split with the organisers' seed-42 80/20 snippet.
+- **The holdout is written as two files.** Inputs (`ticket_id`, `subject`, `body`) and labels are separate; only
+  `scripts/evaluate.py` reads the labels.
+- **Training and retrieval use the KB split only.** Classifier, thresholds and gate settings come from the 80% KB split;
+  tuning uses a 10% slice of it. Only KB answers are indexed or shown.
+- **No 20k CSV.** The 20k file is never mixed in, because it shares 8,399 bodies with the main file.
+- **Demo data uses holdout inputs only.** `seed_demo.py` takes subject and body from the holdout, never labels or answers.
 
-The sweep numbers above were measured with the Incident-only hard rule; including Problem escalates more (see Root-cause grouping below).
+## Repository
 
-## Root-cause grouping (ITIL)
+```
+app.py, views/, sentinel_ui/   Streamlit console (Live triage, portal, organisation, dashboard)
+src/sentineldesk/              pipeline: pii, embed, classify, retrieve, rootcause, burst, gate, generate
+scripts/                       prepare_data, train_classifier, build_kb_index, evaluate, attack_table,
+                               gate_sweep / gate_calibrate, retrieval_check, draft_eval, seed_demo
+tests/                         contract, gate, adversarial, root cause, status
+reports/                       every number above, as JSON / CSV / Markdown
+run.sh                         setup, test, eval, seed, app, demo
+```
 
-Support work follows the ITIL model: a **Request** asks for something ("I need a laptop"), an **Incident** reports something
-broken, and many Incidents share one **Problem** (the root cause), which is fixed by **Changes**.
-`src/sentineldesk/rootcause.py` uses this model in three ways:
-
-- **Critical rule covers Problems too.** Incident and Problem differ by relationship, not wording (712 of 760 type errors
-  are Incident ↔ Problem), so the gate's hard rule fires on *high + (Incident or Problem)*. On validation this raises
-  high-priority Incident recall from 0.803 to 0.882, while the share of tickets this rule escalates goes from 26% to 37%.
-  To revert, set `config.CRITICAL_TYPES = ("Incident",)`.
-- **Live grouping.** Each new issue is compared with live issues from the last 30 minutes. Three or more at cosine
-  similarity ≥ 0.89 (just above the 90th percentile of unrelated pairs) escalate with *"Probable shared root cause — raise a
-  Problem record"*. Grouping works across languages: three English Outlook tickets and a German one group together, and
-  an invoice ticket stays out.
-- **Known history, integrated with RAG.** The closest past Problem and Change are found in the same retrieval index the
-  drafter uses (query → passage), shown when similarity is ≥ 0.89 (just above the 99th percentile of unrelated pairs).
-  If retrieval didn't already return that Problem, it's added to the drafter's precedents, so the reply can cite the root
-  cause. On 300 holdout tickets, 92% of issues linked to a known Problem. Hand-typed tickets score lower (about
-  0.86–0.89), so they link less often.
-
-The dataset has no explicit Incident → Problem links, so these thresholds come from similarity distributions, not
-labelled groups. Tests: `PYTHONPATH=src python tests/test_rootcause.py`.
-
-## Leakage guarantees
-
-- **Holdout split by file.** `prepare_data.py` writes the holdout as two files: `test_inputs.parquet` (ticket_id, subject, body)
-  and `test_labels.parquet`. Only `scripts/evaluate.py` reads the labels.
-- **Training data.** The classifier, its threshold and all hyperparameters come from the 80% KB split; tuning uses a 10% slice of it.
-- **Retrieval and prompts.** Only KB answers may be retrieved or shown.
-- **No mixing of files.** The 20k CSV is never mixed in, because it shares 8,399 bodies with the main file.
+**Further reading:**
+- [docs/SUBMISSION.md](docs/SUBMISSION.md): each hackathon requirement and how we met it.
+- [docs/technical.md](docs/technical.md): the detailed reference.
+- [docs/architecture.html](docs/architecture.html): the architecture write-up.
+- [docs/p1_workdone.md](docs/p1_workdone.md) and [docs/p3_workdone.md](docs/p3_workdone.md): per-track notes.
