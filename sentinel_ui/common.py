@@ -69,93 +69,167 @@ def inject_css():
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
-        :root{--ink:#0E1A2B;--ink2:#172A44;--surface:#F3F5F8;--card:#FFFFFF;--line:#DCE2EA;
-              --text:#1C2735;--muted:#5A6A7E;--accent:#C8102E;--ok:#0F766E;--warn:#B45309;--info:#1D4ED8}
-        html,body,.stApp,[data-testid="stMarkdownContainer"],input,textarea,button,select{
-            font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif!important}
-        .stApp{background:var(--surface)}
+        @import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap');
+        /* Northeastern University palette: red, black, white, warm gray */
+        :root{--nu-red:#C8102E;--nu-red-dark:#A00D24;--nu-red-soft:#FBE7EA;--ink:#000000;--ink2:#1A1A1A;
+              --surface:#F6F6F4;--card:#FFFFFF;--line:#D9D9D6;--field:#BDBDB8;--text:#111111;--muted:#5C5C58;
+              --accent:#C8102E;--ok:#0F766E;--warn:#B45309}
+        html,body,.stApp,[data-testid="stMarkdownContainer"],input,textarea,button,select,label,p,li{
+            font-family:'Lato',-apple-system,'Segoe UI',Helvetica,Arial,sans-serif!important}
+        .stApp{background:var(--surface);color:var(--text)}
         header[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"]{display:none!important}
-        .block-container{padding-top:1.1rem!important;padding-bottom:2.5rem;max-width:1440px}
-        /* sidebar */
-        section[data-testid="stSidebar"]{background:var(--ink)}
+        .block-container{padding-top:1.4rem!important;padding-bottom:2.5rem;max-width:1360px}
+        h1,h2,h3,h4{color:var(--ink);font-weight:900!important;letter-spacing:-.01em}
+
+        /* ---------------- sidebar: black, white type, red marker on the current page */
+        section[data-testid="stSidebar"]{background:var(--ink);border-right:4px solid var(--nu-red)}
         section[data-testid="stSidebar"] p,section[data-testid="stSidebar"] span,
-        section[data-testid="stSidebar"] label,section[data-testid="stSidebar"] summary{color:#C3CEDB!important}
-        [data-testid="stSidebarNav"] a{border-radius:6px}
-        [data-testid="stSidebarNav"] a[aria-current="page"]{background:rgba(255,255,255,.09)}
-        [data-testid="stSidebarNav"] a[aria-current="page"] span{color:#FFFFFF!important;font-weight:600}
-        section[data-testid="stSidebar"] [data-testid="stExpander"] details{border-color:rgba(255,255,255,.15)}
-        /* page header */
+        section[data-testid="stSidebar"] label,section[data-testid="stSidebar"] summary{color:#E8E8E6!important}
+        [data-testid="stSidebarNav"] a{border-radius:4px;border-left:4px solid transparent;margin:2px 0}
+        [data-testid="stSidebarNav"] a:hover{background:rgba(255,255,255,.07)}
+        [data-testid="stSidebarNav"] a[aria-current="page"]{background:rgba(200,16,46,.22);border-left-color:var(--nu-red)}
+        [data-testid="stSidebarNav"] a[aria-current="page"] span{color:#FFFFFF!important;font-weight:700}
+        [data-testid="stSidebarNav"] [data-testid="stIconMaterial"]{color:var(--nu-red)!important;font-size:1.25rem}
+        [data-testid="stSidebarNav"] a[aria-current="page"] [data-testid="stIconMaterial"]{color:#FFFFFF!important}
+        section[data-testid="stSidebar"] [data-baseweb="checkbox"]>div:first-child{background:#4A4A47!important}
+        section[data-testid="stSidebar"] [data-baseweb="checkbox"] input:checked+div{background:var(--nu-red)!important}
+
+        /* ---------------- form fields: white boxes with a visible border, red focus */
+        [data-baseweb="input"],[data-baseweb="textarea"],[data-baseweb="select"]>div{
+            background:#FFFFFF!important;border:1px solid var(--field)!important;border-radius:6px!important}
+        [data-baseweb="input"] input,[data-baseweb="textarea"] textarea{background:#FFFFFF!important;color:var(--text)!important}
+        [data-baseweb="input"]:focus-within,[data-baseweb="textarea"]:focus-within,[data-baseweb="select"]>div:focus-within{
+            border-color:var(--nu-red)!important;box-shadow:0 0 0 3px rgba(200,16,46,.15)!important}
+        [data-testid="stWidgetLabel"] p{font-weight:700;color:var(--ink);font-size:.93rem}
+        div[data-testid="stForm"]{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--nu-red);
+            border-radius:8px;padding:1.3rem 1.4rem 1.1rem}
+
+        /* ---------------- buttons: red primary, outlined secondary */
+        .stButton button,[data-testid="stFormSubmitButton"] button{border-radius:6px;font-weight:700;
+            border:1px solid var(--ink);color:var(--ink);background:#FFFFFF;transition:all .15s ease}
+        .stButton button:hover,[data-testid="stFormSubmitButton"] button:hover{border-color:var(--nu-red);color:var(--nu-red)}
+        .stButton button[kind="primary"],[data-testid="stFormSubmitButton"] button[kind="primaryFormSubmit"],
+        [data-testid="stFormSubmitButton"] button[kind="primary"]{background:var(--nu-red);border-color:var(--nu-red);color:#FFFFFF}
+        .stButton button[kind="primary"]:hover,[data-testid="stFormSubmitButton"] button:hover[kind^="primary"]{
+            background:var(--nu-red-dark);border-color:var(--nu-red-dark);color:#FFFFFF}
+
+        /* service tiles on the portal: equal height, one tidy row */
+        [class*="st-key-tile_"] button{min-height:68px;height:68px;width:100%;line-height:1.2;
+            background:#FFFFFF;border:1px solid var(--line);color:var(--ink)}
+        [class*="st-key-tile_"] button p{font-size:.9rem;font-weight:700;white-space:normal}
+        [class*="st-key-tile_"] button:hover{border-color:var(--nu-red);color:var(--nu-red);
+            box-shadow:0 4px 14px rgba(0,0,0,.08)}
+        [class*="st-key-tile_"] button[kind="primary"]{background:var(--nu-red);border-color:var(--nu-red);color:#FFFFFF}
+        [class*="st-key-tile_"] button[kind="primary"] p{color:#FFFFFF}
+        /* language toggle stays on one line */
+        [data-testid="stButtonGroup"]{justify-content:flex-end}
+        [data-testid="stButtonGroup"]>div{flex-wrap:nowrap}
+
+        /* EN / DE toggle: selected language in solid red */
+        [data-testid="stButtonGroup"] button{border-color:var(--ink)!important;color:var(--ink)!important;font-weight:700}
+        [data-testid="stButtonGroup"] button[kind*="Active"]{background:var(--nu-red)!important;
+            border-color:var(--nu-red)!important;color:#FFFFFF!important}
+        [data-testid="stButtonGroup"] button[kind*="Active"] p{color:#FFFFFF!important}
+
+        /* tabs: red underline on the active one */
+        .stTabs [data-baseweb="tab-list"]{gap:1.6rem;border-bottom:1px solid var(--line)}
+        .stTabs [data-baseweb="tab"] p{font-weight:700;font-size:1rem;color:var(--muted)}
+        .stTabs [aria-selected="true"] p{color:var(--nu-red)!important}
+        .stTabs [data-baseweb="tab-highlight"]{background:var(--nu-red)!important;height:3px}
+
+        /* ---------------- page header */
         .ph{display:flex;align-items:flex-end;justify-content:space-between;gap:1rem;margin:0 0 1rem}
-        .ph .t{font-size:1.65rem;font-weight:600;color:var(--text);letter-spacing:-.01em;line-height:1.2}
-        .ph .s{color:var(--muted);font-size:.98rem;margin-top:.2rem}
-        /* hero */
-        .hero{position:relative;overflow:hidden;border-radius:12px;background:var(--ink);color:#fff;
-              padding:3rem 2.8rem;min-height:300px;animation:rise .7s ease-out both}
-        .hero .bg{position:absolute;inset:-40%;background:
-            radial-gradient(38% 38% at 72% 28%,rgba(200,16,46,.42),transparent 62%),
-            radial-gradient(34% 34% at 22% 78%,rgba(37,99,235,.30),transparent 62%),
-            radial-gradient(30% 30% at 88% 86%,rgba(15,118,110,.25),transparent 62%);
-            animation:drift 16s ease-in-out infinite alternate}
-        .hero .grid{position:absolute;inset:0;background-image:
-            linear-gradient(rgba(255,255,255,.06) 1px,transparent 1px),
-            linear-gradient(90deg,rgba(255,255,255,.06) 1px,transparent 1px);
-            background-size:44px 44px;-webkit-mask-image:linear-gradient(100deg,transparent 30%,#000 75%);
-            mask-image:linear-gradient(100deg,transparent 30%,#000 75%)}
-        .hero .scan{position:absolute;left:0;right:0;height:120px;top:-120px;
-            background:linear-gradient(180deg,transparent,rgba(255,255,255,.07),transparent);
-            animation:scan 7s linear infinite}
-        .hero .photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:.55}
-        .hero .shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(14,26,43,.96) 0%,rgba(14,26,43,.80) 45%,rgba(14,26,43,.25) 100%)}
-        .hero .in{position:relative;z-index:2;max-width:680px}
-        .hero .k{color:#F7B6C1;font-weight:600;font-size:.9rem;margin-bottom:.7rem}
-        .hero .h{font-size:2.55rem;line-height:1.12;font-weight:700;letter-spacing:-.02em;margin:0 0 .9rem;color:#fff}
-        .hero .p{color:#C9D4E1;font-size:1.08rem;line-height:1.55;max-width:56ch}
-        @keyframes drift{from{transform:translate(0,0) rotate(0)}to{transform:translate(7%,-5%) rotate(10deg)}}
-        @keyframes scan{to{top:110%}}
-        @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
-        /* stat strip with count-up */
-        @property --n{syntax:'<integer>';initial-value:0;inherits:false}
-        .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:0;background:var(--card);
-               border:1px solid var(--line);border-radius:12px;margin:1rem 0 1.4rem;animation:rise .7s .15s ease-out both}
-        .stats>div{padding:1.15rem 1.4rem;border-left:1px solid var(--line)}
+        .ph .t{font-size:1.8rem;font-weight:900;color:var(--ink);letter-spacing:-.01em;line-height:1.15}
+        .ph .s{color:var(--muted);font-size:1rem;margin-top:.2rem}
+
+        /* ---------------- hero: black with a red edge, white type */
+        .hero{position:relative;overflow:hidden;border-radius:8px;background:var(--ink);color:#fff;
+              padding:2.8rem 2.8rem 2.6rem;min-height:260px;border-left:8px solid var(--nu-red)}
+        .hero .bg{position:absolute;inset:0;background:
+            linear-gradient(115deg,transparent 76%,rgba(200,16,46,.9) 76%,rgba(200,16,46,.9) 79%,transparent 79%),
+            linear-gradient(115deg,transparent 81%,rgba(200,16,46,.35) 81%,rgba(200,16,46,.35) 92%,transparent 92%)}
+        .hero .grid,.hero .scan{display:none}
+        .hero .photo{position:absolute;inset:0;background-size:cover;background-position:center;opacity:.45}
+        .hero .shade{position:absolute;inset:0;background:linear-gradient(90deg,#000 0%,rgba(0,0,0,.85) 50%,rgba(0,0,0,.35) 100%)}
+        .hero .in{position:relative;z-index:2;max-width:700px}
+        /* sign-in banner: same height as the sign-in card next to it, text centred */
+        .hero.login{min-height:337px;display:flex;align-items:center;padding-top:2rem;padding-bottom:2rem}
+        /* inline code (demo accounts etc.): Northeastern red, not Streamlit green */
+        [data-testid="stMarkdownContainer"] code,[data-testid="stCaptionContainer"] code{
+            color:var(--nu-red-dark)!important;background:var(--nu-red-soft)!important;border-radius:4px}
+        .hero .k{display:inline-block;background:var(--nu-red);color:#FFFFFF;font-weight:900;font-size:.78rem;
+                 letter-spacing:.12em;text-transform:uppercase;padding:.3rem .6rem;border-radius:3px;margin-bottom:1rem}
+        .hero .h{font-size:2.6rem;line-height:1.1;font-weight:900;letter-spacing:-.02em;margin:0 0 .9rem;color:#FFFFFF}
+        .hero .p{color:#E6E6E3;font-size:1.1rem;line-height:1.55;max-width:56ch}
+
+        /* ---------------- stat strip */
+        .stats{display:grid;grid-template-columns:repeat(4,1fr);background:var(--card);
+               border:1px solid var(--line);border-radius:8px;margin:1rem 0 1.4rem;overflow:hidden}
+        .stats>div{padding:1.1rem 1.4rem;border-left:1px solid var(--line);border-top:4px solid var(--nu-red)}
         .stats>div:first-child{border-left:0}
-        .num{font-size:2rem;font-weight:700;color:var(--ink);line-height:1.1}
-        .num .c{animation:count 1.8s .3s ease-out both;counter-reset:n var(--n)}
-        .num .c::after{content:counter(n)}
-        @keyframes count{from{--n:0}to{--n:var(--to)}}
+        .num{font-size:2.1rem;font-weight:900;color:var(--ink);line-height:1.1}
         .lbl{color:var(--muted);font-size:.9rem;margin-top:.25rem}
-        /* cards */
-        .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.3rem 1.4rem;
-              height:100%;transition:transform .18s ease,box-shadow .18s ease}
-        .card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(14,26,43,.08)}
-        .card .ic{width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;
-                  background:#FCE8EC;color:var(--accent);margin-bottom:.8rem}
-        .card .ct{font-weight:600;font-size:1.08rem;color:var(--text);margin-bottom:.3rem}
+
+        /* ---------------- cards */
+        .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:1.3rem 1.4rem;
+              height:100%;transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+        .card:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(0,0,0,.08);border-color:var(--nu-red)}
+        .card .ic{width:42px;height:42px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+                  background:var(--nu-red);color:#FFFFFF;margin-bottom:.8rem}
+        .card .ct{font-weight:900;font-size:1.1rem;color:var(--ink);margin-bottom:.3rem}
         .card .cd{color:var(--muted);font-size:.95rem;line-height:1.5}
         .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
-        .step .n{font-size:.85rem;font-weight:700;color:var(--accent)}
-        /* status + badges */
-        .badge{display:flex;gap:.55rem;align-items:flex-start;padding:.65rem .9rem;border-radius:8px;
-               font-weight:500;margin:.25rem 0 .9rem;font-size:.95rem}
+        .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:1.1rem;margin-bottom:.4rem}
+        .link-card{display:flex;flex-direction:column}
+        .link-card .cd{flex:1}
+        .link-card a.go{align-self:flex-start;margin-top:1.1rem;background:var(--nu-red);color:#FFFFFF!important;
+            text-decoration:none!important;font-weight:700;font-size:.92rem;padding:.55rem 1rem;border-radius:6px;
+            transition:background .15s ease}
+        .link-card a.go:hover{background:var(--nu-red-dark)}
+        .step .n{font-size:.78rem;font-weight:900;color:var(--nu-red);letter-spacing:.1em;text-transform:uppercase}
+
+        /* ---------------- status badges */
+        .badge{display:flex;gap:.55rem;align-items:flex-start;padding:.7rem .95rem;border-radius:6px;
+               font-weight:700;margin:.25rem 0 .9rem;font-size:.95rem;border-left:5px solid}
         .badge .dot{width:9px;height:9px;border-radius:50%;margin-top:.42rem;flex:none}
-        .ok{background:#E7F5F2;color:#0B4F4A}.ok .dot{background:var(--ok)}
-        .esc{background:#FCEBEC;color:#7A1020}.esc .dot{background:var(--accent);animation:pulse 1.6s infinite}
-        .badge.warn{background:#FEF3E2;color:#7C3A06}.badge.warn .dot{background:var(--warn)}
-        @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(200,16,46,.5)}70%{box-shadow:0 0 0 8px rgba(200,16,46,0)}100%{box-shadow:0 0 0 0 rgba(200,16,46,0)}}
-        .pill{display:inline-block;padding:.12rem .6rem;border-radius:999px;font-size:.82rem;font-weight:600;
-              background:#EEF1F5;color:#334155;margin:0 .25rem .25rem 0}
-        .avatar{width:38px;height:38px;border-radius:50%;background:var(--ink);color:#fff;font-weight:600;
-                display:flex;align-items:center;justify-content:center;font-size:.9rem;margin-left:auto}
-        .topbar{display:flex;align-items:center;gap:1rem;background:var(--ink);color:#fff;border-radius:10px;
+        .ok{background:#E8F4F1;color:#0B4F4A;border-color:var(--ok)}.ok .dot{background:var(--ok)}
+        .esc{background:var(--nu-red);color:#FFFFFF;border-color:var(--ink)}.esc .dot{background:#FFFFFF;animation:pulse 1.6s infinite}
+        .badge.warn{background:#FEF3E2;color:#7C3A06;border-color:var(--warn)}.badge.warn .dot{background:var(--warn)}
+        @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,255,255,.7)}70%{box-shadow:0 0 0 8px rgba(255,255,255,0)}100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}}
+        .outage{background:var(--nu-red);color:#FFFFFF;border-radius:8px;padding:1rem 1.3rem;margin:.2rem 0 1rem;
+            border-left:10px solid #000;animation:flash 1.4s ease-in-out 3}
+        .outage .ot{font-weight:900;letter-spacing:.12em;font-size:.95rem}
+        .outage .od{font-size:1.05rem;margin-top:.25rem}
+        .outage .oi{font-size:.85rem;opacity:.9;margin-top:.35rem}
+        @keyframes flash{50%{box-shadow:0 0 0 6px rgba(200,16,46,.25)}}
+        .pii{background:#FFFFFF;border:1px solid var(--line);border-radius:6px;padding:.55rem .85rem;margin:.6rem 0;
+            font-size:.92rem}
+        .pii .pill{margin:0 .2rem}
+        .pill{display:inline-block;padding:.12rem .6rem;border-radius:999px;font-size:.82rem;font-weight:700;
+              background:var(--nu-red-soft);color:var(--nu-red-dark);margin:0 .25rem .25rem 0}
+
+        /* ---------------- misc */
+        .avatar{width:40px;height:40px;border-radius:50%;background:var(--nu-red);color:#FFFFFF;font-weight:900;
+                display:flex;align-items:center;justify-content:center;font-size:.9rem;margin-left:auto;
+                border:2px solid var(--ink)}
+        .topbar{display:flex;align-items:center;gap:1rem;background:var(--ink);color:#fff;border-radius:8px;
                 padding:.75rem 1.1rem;margin-bottom:1rem}
-        .topbar .tt{font-weight:600;font-size:1.05rem}.topbar .ts{color:#A9B7C8;font-size:.9rem}
-        .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1rem 1.2rem}
-        div[data-testid="stForm"]{background:var(--card);border:1px solid var(--line);border-radius:12px}
-        [data-testid="stMetric"]{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.8rem 1rem}
-        @media (max-width:900px){.stats,.steps{grid-template-columns:repeat(2,1fr)}.hero .h{font-size:2rem}}
-        @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}
-            .num .c{--n:var(--to)}}
+        .topbar .tt{font-weight:900;font-size:1.05rem}.topbar .ts{color:#CFCFCB;font-size:.9rem}
+        .panel{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:1rem 1.2rem}
+        [data-testid="stMetric"]{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--nu-red);
+            border-radius:8px;padding:.8rem 1rem}
+        [data-testid="stMetricValue"]{font-weight:900;color:var(--ink)}
+        [data-testid="stMetricValue"]>div{white-space:normal!important;overflow:visible!important;
+            text-overflow:clip!important;font-size:1.45rem;line-height:1.2}
+        [data-testid="stMetricDelta"]>div{white-space:normal!important;overflow:visible!important;text-overflow:clip!important}
+        [data-testid="stMetricDelta"] svg{display:none}
+        [data-testid="stMetricDelta"]{color:var(--muted)!important}
+        [data-testid="stExpander"] details{background:#FFFFFF;border:1px solid var(--line);border-radius:6px}
+        [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:6px}
+        a{color:var(--nu-red)}
+        @media (max-width:900px){.stats,.steps{grid-template-columns:repeat(2,1fr)}.cards{grid-template-columns:repeat(2,1fr)}
+            .hero .h{font-size:2rem}}
+        @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
         </style>
         """,
         unsafe_allow_html=True,
@@ -265,6 +339,8 @@ DEMO_USERS = {
     "nima@northeastern.edu": ("husky2026", "Nima"),
     "demo@northeastern.edu": ("demo", "Demo Student"),
     "prof@northeastern.edu": ("demo", "Professor Demo"),
+    "varma.ay@northeastern.edu": ("ayush", "Ayush Varma"),
+    "gupta.kunal@northeastern.edu": ("kunal", "Kunal Gupta"),
 }
 
 # ------------------------------------------------------------------ backend
@@ -275,6 +351,8 @@ def _load_real_backend():
     mod = importlib.import_module(mod_name)
     if hasattr(mod, "warm_up"):
         mod.warm_up()          # load encoder, classifier and index once, before the first ticket
+    if hasattr(mod, "prime_outage_detector"):
+        mod.prime_outage_detector(load_live())   # an outage in progress survives a server restart
     return getattr(mod, fn_name), target
 
 
@@ -324,6 +402,8 @@ def normalize_result(r: dict) -> dict:
         "draft": r.get("draft"),
         "cited_ids": list(r.get("cited_ids", [])),
         "pii_found": list(r.get("pii_found", [])),
+        "pii_counts": dict(r.get("pii_counts") or {k: 1 for k in r.get("pii_found", [])}),
+        "masked_text": r.get("masked_text"),
         "latency_ms": r.get("latency_ms", {}),
     }
 
@@ -339,6 +419,14 @@ def run_triage(subject: str | None, body: str) -> dict:
     res = normalize_result(fn((subject or "").strip() or None, body))
     res["wall_ms"] = round((datetime.now() - t0).total_seconds() * 1000, 1)
     return res
+
+
+def reset_outage_detector() -> None:
+    """Clear the burst detector of the backend actually in use (the cached one, not a fresh import)."""
+    fn, name = get_backend()
+    reset = getattr(fn, "__globals__", {}).get("reset_outage_detector")
+    if "mock" not in name and reset:
+        reset()
 
 
 def learn_from_resolution(rec: dict, reply: str, ai_draft: str | None, agent: str) -> str | None:
@@ -438,7 +526,8 @@ def ticket_priority(kind: str, model_priority: str, user_priority: str | None) -
     return model_priority
 
 
-def add_ticket(kind: str, user: str, subject: str, body: str, extra: dict, res: dict) -> dict:
+def add_ticket(kind: str, user: str, subject: str, body: str, extra: dict, res: dict,
+               opened: datetime | None = None) -> dict:
     with _lock:
         tickets = load_live()
         prefix = "INC" if kind == "incident" else "REQ"
@@ -448,7 +537,8 @@ def add_ticket(kind: str, user: str, subject: str, body: str, extra: dict, res: 
         rec = {
             "number": f"{prefix}{n:07d}",
             "kind": kind, "ticket_type": KIND_TYPE.get(kind, "Request"), "user": user,
-            "opened": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "opened": (opened or datetime.now()).strftime("%Y-%m-%d %H:%M"),
+            "live_id": (res.get("burst") or {}).get("live_id"),   # burst detector id, maps banners to numbers
             "subject": subject, "body": body, **extra,
             "user_priority": user_p,
             # The gate's on-call decision outranks both: a critical incident is P1.
@@ -493,6 +583,56 @@ def load_metrics() -> dict | None:
     }
 
 
+def _opened(x: dict) -> datetime | None:
+    try:
+        return datetime.strptime(x["opened"], "%Y-%m-%d %H:%M")
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def major_incidents(tickets: list[dict], window_min: int = 30) -> list[dict]:
+    """Group portal tickets that raised the burst banner into major incidents.
+
+    A ticket belongs to an incident when the burst detector flagged it; the earlier reports it matched
+    (burst["related"], mapped back to INC numbers through live_id) are pulled in too, so an incident lists
+    every report of the failure, not only the ones after the threshold was crossed. Flagged tickets less
+    than window_min apart are one incident. An incident is active while its last report is in the window.
+    """
+    by_live = {x.get("live_id"): x for x in tickets if x.get("live_id")}
+    flagged = sorted((x for x in tickets if (x["triage"].get("burst") or {}).get("active") and _opened(x)),
+                     key=_opened)
+    groups: list[list[dict]] = []
+    for x in flagged:
+        if groups and (_opened(x) - _opened(groups[-1][-1])).total_seconds() <= window_min * 60:
+            groups[-1].append(x)
+        else:
+            groups.append([x])
+    out, now = [], datetime.now()
+    for g in groups:
+        members = {x["number"]: x for x in g}
+        for x in g:
+            for rid in (x["triage"].get("burst") or {}).get("related", []):
+                if rid in by_live:
+                    members.setdefault(by_live[rid]["number"], by_live[rid])
+        ms = sorted(members.values(), key=_opened)
+        start, end = _opened(ms[0]), _opened(ms[-1])
+        services = sorted({m.get("service") for m in ms if m.get("service")})
+        out.append({"start": start, "end": end, "count": len(ms), "numbers": [m["number"] for m in ms],
+                    "services": services, "title": ms[0]["subject"] or ms[0]["body"][:60],
+                    "active": (now - end).total_seconds() <= window_min * 60})
+    return out
+
+
+def incident_banner(inc: dict):
+    """Major Incident banner for a stored incident (Organisation page, portal)."""
+    svc = f" · {', '.join(inc['services'])}" if inc["services"] else ""
+    st.markdown(
+        f'<div class="outage"><div class="ot">MAJOR INCIDENT IN PROGRESS{svc.upper()}</div>'
+        f'<div class="od">{inc["count"]} reports of the same failure since {inc["start"]:%H:%M}, latest at '
+        f'{inc["end"]:%H:%M}. Routed to the on-call engineer.</div>'
+        f'<div class="oi">Tickets: {", ".join(inc["numbers"])}</div></div>', unsafe_allow_html=True)
+
+
 def ticket_type(x: dict) -> str:
     """Type of record for a live ticket (the form's choice); older records fall back to the model."""
     return x.get("ticket_type") or x["triage"]["type"]["label"]
@@ -511,34 +651,77 @@ def status_badge(res: dict):
     badge(kind, STATUS_TEXT.get(status, status) + (f": {why}" if why else ""))
 
 
+PII_NAMES = {"email": "email", "phone": "phone number", "ip": "IP address", "iban": "IBAN",
+             "card": "card number", "account": "account number"}
+
+
+def outage_banner(burst: dict | None):
+    """Major Incident Outage Banner: several near-identical tickets arrived in a short window."""
+    if not burst or not burst.get("active"):
+        return
+    related = burst.get("related", [])
+    n = len(related) + 1
+    window = burst.get("window_min", 30)
+    ids = ", ".join(related + ([burst["live_id"]] if burst.get("live_id") else []))
+    st.markdown(
+        f'<div class="outage"><div class="ot">MAJOR INCIDENT · POSSIBLE OUTAGE</div>'
+        f'<div class="od">{n} tickets describing the same failure in the last {window} minutes. '
+        f'Escalated to the on-call engineer.</div>'
+        f'<div class="oi">Related live tickets: {ids}</div></div>', unsafe_allow_html=True)
+
+
+def render_pii(res: dict):
+    """PII guardrail: what was masked before any text left the machine for the LLM API."""
+    counts = res.get("pii_counts") or {}
+    if counts:
+        pills = "".join(f'<span class="pill">{n} × {PII_NAMES.get(k, k)}</span>' for k, n in counts.items())
+        st.markdown(f'<div class="pii"><b>PII guardrail</b> masked before the LLM call: {pills}</div>',
+                    unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="pii"><b>PII guardrail</b> nothing personal found to mask.</div>',
+                    unsafe_allow_html=True)
+    if res.get("masked_text"):
+        with st.expander("Text sent to the LLM (after masking)"):
+            st.code(res["masked_text"], language=None, wrap_lines=True)
+
+
 def render_triage(res: dict, show_draft: bool = True, draft_key: str = "draft"):
+    outage_banner(res.get("burst"))
     status_badge(res)
 
     c = st.columns(5)
     for col, key, title in [(c[0], "type", "Type"), (c[1], "queue", "Queue"),
                             (c[2], "priority", "Priority")]:
         col.metric(title, res[key]["label"].title() if key == "priority" else res[key]["label"],
-                   f"{res[key]['confidence']:.0%} sure", delta_color="off")
-    c[3].metric("Language", {"en": "English", "de": "German"}.get(res["language"], res["language"]))
-    lat = res.get("wall_ms") or res.get("latency_ms", {}).get("total", 0)
-    c[4].metric("Latency", f"{lat:,.0f} ms")
-    if res.get("pii_found"):
-        st.caption(f"Masked before processing: {', '.join(res['pii_found'])}")
+                   f"{res[key]['confidence']:.0%} confidence", delta_color="off")
+    c[3].metric("Language", {"en": "English", "de": "German"}.get(res["language"], res["language"]),
+                "detected from the text", delta_color="off")
+    lat = res.get("latency_ms", {})
+    total = res.get("wall_ms") or lat.get("total", 0)
+    c[4].metric("Latency (end to end)", f"{total:,.0f} ms", delta_color="off",
+                delta=f"triage {lat.get('triage', 0):,.0f} · retrieval {lat.get('retrieval', 0):,.0f} · "
+                      f"draft {lat.get('generation', 0):,.0f} ms" if lat else None)
+    render_pii(res)
 
     left, right = st.columns(2)
     if show_draft:
         with left:
-            st.markdown("**Draft reply**")
+            st.markdown("#### Draft reply")
             if res.get("draft"):
-                st.text_area("Draft", res["draft"], height=230, key=draft_key,
-                             label_visibility="collapsed")
+                st.text_area("Draft", res["draft"], height=260, key=draft_key, label_visibility="collapsed")
                 if res.get("cited_ids"):
-                    st.caption("Based on: " + ", ".join(res["cited_ids"]))
+                    st.caption("Cites past tickets: " + ", ".join(res["cited_ids"])
+                               + (f" · written by {res['engine']}" if res.get("engine") else ""))
+                if res.get("unverified"):
+                    st.warning("Not found in the evidence, check before sending: " + ", ".join(res["unverified"]))
             else:
-                st.warning("No draft. Nothing in past resolutions supports this request, "
-                           "so a human should answer it.")
+                st.warning("No draft: critical incidents go straight to the on-call engineer."
+                           if res.get("status") == ON_CALL else
+                           "No draft: the safety gate held this ticket for a person (see the reasons above)."
+                           if res["escalation"]["reasons"] else
+                           "No draft. Nothing in past resolutions supports this request, so a human should answer it.")
     with (right if show_draft else left):
-        st.markdown("**Matching past tickets**")
+        st.markdown("#### Top retrieved past tickets")
         render_retrieved(res.get("retrieved", []))
 
 
@@ -547,8 +730,13 @@ def render_retrieved(items: list[dict]):
         st.info("No similar past tickets found.")
         return
     df = pd.DataFrame(items)
-    cols = [c for c in ["ticket_id", "similarity", "language", "subject", "answer_snippet"]
+    cols = [c for c in ["ticket_id", "similarity", "language", "answer_snippet", "subject"]
             if c in df.columns]
     st.dataframe(df[cols], hide_index=True, use_container_width=True,
-                 column_config={"similarity": st.column_config.ProgressColumn(
-                     "similarity", min_value=0.0, max_value=1.0, format="%.2f")})
+                 column_config={
+                     "ticket_id": st.column_config.TextColumn("Ticket", width="small"),
+                     "similarity": st.column_config.ProgressColumn(
+                         "Similarity", min_value=0.0, max_value=1.0, format="%.3f", width="small"),
+                     "language": st.column_config.TextColumn("Lang", width="small"),
+                     "answer_snippet": st.column_config.TextColumn("Historical answer", width="large"),
+                     "subject": st.column_config.TextColumn("Subject", width="medium")})

@@ -4,7 +4,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sentinel_ui.common import (ON_CALL, backend_sidebar, inject_css, learn_from_resolution, load_kb, load_live,
+from sentinel_ui.common import (ON_CALL, backend_sidebar, incident_banner, inject_css, learn_from_resolution,
+                                load_kb, load_live, major_incidents,
                                 render_retrieved, run_triage, status_badge, ticket_priority_label, ticket_type,
                                 update_ticket)
 
@@ -27,7 +28,9 @@ L = {
            "assignee": "Assigned to", "open_in_group": "open tickets in this group",
            "use": "Send this reply and resolve", "ask": "Ask the bot", "activity": "Activity",
            "no_activity": "No activity yet.", "evidence": "Past tickets used as evidence",
-           "no_draft": "No draft: nothing in past resolutions supports this request. A human should reply."},
+           "no_draft": "No draft: nothing in past resolutions supports this request. A human should reply.",
+           "no_draft_oncall": "No draft: critical incidents go straight to the on-call engineer.",
+           "no_draft_held": "No draft: the safety gate held this ticket for a person (see the reasons above)."},
     "de": {"title": "Organisation", "sub": "Northeastern ITS Service Desk", "search": "INC oder Zusammenfassung suchen",
            "inc": "INC", "summary": "Zusammenfassung", "p": "P", "date": "Datum", "status": "Status",
            "assigned": "Zugewiesen an (Abt.)", "tagtype": "Tag / Typ", "pick": "Wählen Sie ein Ticket aus.",
@@ -37,7 +40,9 @@ L = {
            "assignee": "Zugewiesen an", "open_in_group": "offene Tickets in dieser Gruppe",
            "use": "Antwort senden und lösen", "ask": "Bot fragen", "activity": "Aktivität",
            "no_activity": "Noch keine Aktivität.", "evidence": "Verwendete frühere Tickets",
-           "no_draft": "Kein Entwurf: Keine frühere Lösung stützt diese Anfrage. Ein Mensch sollte antworten."},
+           "no_draft": "Kein Entwurf: Keine frühere Lösung stützt diese Anfrage. Ein Mensch sollte antworten.",
+           "no_draft_oncall": "Kein Entwurf: Kritische Vorfälle gehen direkt an den Bereitschaftsdienst.",
+           "no_draft_held": "Kein Entwurf: Das Sicherheits-Gate hat dieses Ticket für einen Menschen zurückgehalten."},
 }
 
 
@@ -47,7 +52,7 @@ def now() -> str:
 
 # ------------------------------------------------------------------ top bar: title, EN/DE, profile
 st.session_state.setdefault("org_lang", "en")
-bar = st.columns([6, 1.3, 0.5])
+bar = st.columns([6, 1.6, 0.45], vertical_alignment="center")
 with bar[1]:
     pick = st.segmented_control("lang", ["en", "de"], default=st.session_state.org_lang,
                                 format_func=lambda x: {"en": "EN", "de": "DE"}[x],
@@ -64,6 +69,9 @@ kb, real = load_kb()
 if not real:
     st.warning("Ticket history file not found, so a small sample is shown.")
 live = load_live()
+for inc in major_incidents(live):
+    if inc["active"]:
+        incident_banner(inc)
 tag_cols = [c for c in kb.columns if c.startswith("tag_")]
 
 if tag_cols:
@@ -281,7 +289,9 @@ with right:
                     update_ticket(number, state="Resolved", reply=draft, resolved_at=now(), activity=acts)
                     st.rerun()
         else:
-            st.warning(t["no_draft"])
+            reasons = res["escalation"]["reasons"]
+            st.warning(t["no_draft_oncall"] if res.get("status") == ON_CALL
+                       else t["no_draft_held"] if reasons else t["no_draft"])
         with st.expander(t["evidence"]):
             render_retrieved(res.get("retrieved", []))
 

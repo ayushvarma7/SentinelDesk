@@ -8,8 +8,9 @@ SENTINEL_BACKEND=module:function, or tick "Use mock backend" in the sidebar.
 """
 from __future__ import annotations
 
-from sentineldesk import pipeline
+from sentineldesk import config, pii, pipeline
 from sentineldesk.generate import scrub
+from sentineldesk.text import build_text
 
 ON_CALL, REVIEW, AUTO = "ESCALATE_ONCALL", "HUMAN_REVIEW", "AUTO_DRAFT_READY"
 
@@ -23,13 +24,44 @@ def _precedent(p) -> dict:
             "subject": p.subject, "queue": p.queue, "answer_snippet": scrub(p.answer)[:600]}
 
 
+def reset_outage_detector() -> None:
+    """Forget recent live tickets, so an outage drill starts from a clean 30-minute window."""
+    pipeline.BURST.clear()
+
+
+def prime_outage_detector(tickets: list[dict]) -> int:
+    """Replay the stored tickets from the last burst window into the in-memory detector.
+
+    The detector lives in the server process, so after a restart it would forget an outage that is still
+    in progress; priming it means the next matching report joins that outage. Returns how many replayed.
+    """
+    import time
+    from datetime import datetime
+
+    from sentineldesk import embed
+    now, n = time.time(), 0
+    for t in sorted(tickets, key=lambda x: x.get("opened", "")):
+        try:
+            ts = datetime.strptime(t["opened"], "%Y-%m-%d %H:%M").timestamp()
+        except (KeyError, ValueError):
+            continue
+        if now - ts <= config.BURST_WINDOW_S:
+            vec = embed.encode([build_text(t.get("subject"), t.get("body"))], is_query=True)[0]
+            pipeline.BURST.check(vec, now=ts)
+            n += 1
+    return n
+
+
 def warm_up() -> None:
     """Load the encoder, classifier and index once, so the first real ticket is not slow."""
     pipeline.triage("warm-up", "warm-up ticket to load the models", track_burst=False)
 
 
-def triage_ticket(subject: str | None, body: str) -> dict:
-    r = pipeline.triage(subject, body)
+def triage_ticket(subject: str | None, body: str, received_at: float | None = None) -> dict:
+    """received_at (epoch seconds) replays a ticket at its own arrival time (scripts/seed_demo.py)."""
+    r = pipeline.triage(subject, body, received_at=received_at)
+    # Exactly what an external LLM call receives: the pipeline masks this same text before generate.draft().
+    masked_text, _ = pii.mask(build_text(subject, body))
     lat = r.latency_ms
     rc = r.root_cause
     return {
@@ -44,8 +76,12 @@ def triage_ticket(subject: str | None, body: str) -> dict:
         "cited_ids": list(r.cited_ticket_ids),
         "unverified": list(r.unverified_claims),
         "pii_found": sorted(r.masked_pii),
+        "pii_counts": dict(r.masked_pii),
+        "masked_text": masked_text,
         "risks": list(r.risks),
-        "burst": {"active": bool(r.burst.get("active")), "related": list(r.burst.get("related", []))},
+        "burst": {"active": bool(r.burst.get("active")), "related": list(r.burst.get("related", [])),
+                  "live_id": r.burst.get("live_id"), "max_sim": r.burst.get("max_sim", 0.0),
+                  "window_min": config.BURST_WINDOW_S // 60, "min_count": config.BURST_MIN_COUNT},
         "root_cause": None if rc is None else {
             "group": list(rc.group_ticket_ids), "suggest_problem": bool(rc.suggest_problem),
             "known_problem": rc.known_problem.ticket_id if rc.known_problem else None,

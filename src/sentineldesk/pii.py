@@ -24,9 +24,13 @@ PATTERNS: dict[str, re.Pattern[str]] = {
     "iban": re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b"),
     "card": re.compile(r"\b(?:\d[ -]?){12,18}\d\b"),
     "ip": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
-    # keep the keyword, mask only the number: "Kundennummer: <acc_num>"
+    # Keep the keyword and its label, mask only the value: "account number: <acc_num>",
+    # "Kundennummer: <acc_num>". The value must contain a digit, so "account is locked" and the word
+    # "number" itself are never masked.
     "account": re.compile(
-        r"\b(acct|account|konto|kundennummer|customer (?:no|number)|kd-nr)\.?([ #:]*)([A-Z0-9-]{5,})\b",
+        r"\b(acct|account|konto|kundennummer|customer|kd-nr)"
+        r"((?:\s*(?:number|num|no|nr|nummer|id))?\.?\s*[#:]?\s*)"
+        r"((?=[A-Z0-9-]*\d)[A-Z0-9-]{5,})\b",
         re.I),
     # candidate phone numbers; _phone() keeps only those with 7-15 digits that are not dates
     "phone": re.compile(r"(?<![\w<])\+?\(?\d[\d ()./-]{5,}\d(?![\w>])"),

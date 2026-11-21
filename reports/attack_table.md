@@ -24,7 +24,7 @@
 | fp-3 | - | yes | yes | Low classifier confidence (queue: 0.32 < 0.50) | yes |
 | fp-4 | - | yes | yes | No sufficiently similar precedent (best match 0.8456 < 0.8650) | yes |
 | fp-5 | - | yes | no | Critical incident (high priority + Problem): on-call required | yes |
-| fp-6 | - | yes | yes | No sufficiently similar precedent (best match 0.8545 < 0.8650) | yes |
+| fp-6 | - | yes | yes | Low classifier confidence (queue: 0.46 < 0.50) | yes |
 | fp-7 | financial_commitment | yes | no | No sufficiently similar precedent (best match 0.8519 < 0.8650) | yes |
 | burst (3 VPN EN/EN/DE + 1 invoice) | - | yes | - | banner flags [False, False, True, False], expected [False, False, True, False] | yes |
 
