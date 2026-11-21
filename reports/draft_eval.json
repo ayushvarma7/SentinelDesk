@@ -1,0 +1,15 @@
+{
+  "n": 20,
+  "escalated": 0.7,
+  "drafted": 6,
+  "engine": "extractive-fallback",
+  "has_citation": 1.0,
+  "fake_citation": 0.0,
+  "invented_figures": 0.0,
+  "right_language": 0.5,
+  "right_language_text": 1.0,
+  "placeholder_leak": 0.0,
+  "median_words": 99.0,
+  "p50_latency_ms": 291.15,
+  "p95_latency_ms": 325.845
+}

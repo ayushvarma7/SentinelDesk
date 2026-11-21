@@ -45,7 +45,7 @@ def burst_range(vecs) -> tuple[float, float] | None:
 
 def main() -> None:
     config.ROOT.joinpath("reports").mkdir(exist_ok=True)
-    pipeline.triage("warm-up", "warm-up ticket to load the models")
+    pipeline.triage("warm-up", "warm-up ticket to load the models", track_burst=False)
     lines = ["| Case | Risks detected | Escalated | Draft | Top reason | Pass |", "| --- | --- | --- | --- | --- | --- |"]
     passed = 0
     for cid, text, must, must_not in CASES:

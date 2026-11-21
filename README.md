@@ -59,8 +59,8 @@ PYTHONPATH=src python scripts/attack_table.py      # -> reports/attack_table.md
 | PII masking, escalation gate, burst | live: thresholds tuned on the KB validation slice, 26/26 attack table ([docs/p3_workdone.md](docs/p3_workdone.md)) |
 | Embed | live: `multilingual-e5-small`, about 11 ms per ticket after warm-up |
 | Classify | live: frozen model, metrics below |
-| Retrieve | stub, Track B |
-| Generate | stub, Track C |
+| Retrieve | live: exact cosine over the e5 passage index, cross-lingual slot, live precedent store |
+| Generate | live: Gemini with citation/figure verification; extractive fallback without a key |
 
 ## Triage model
 
@@ -97,8 +97,9 @@ Deterministic rules, no LLM in the decision path. Every escalation reason is a s
 | Prompt injection, credential request, destructive bulk action, legal threat (EN + DE regexes) | Always escalate; injections never reach the LLM |
 | High priority + Incident | Escalate to on-call |
 | 3+ similar tickets within 30 min (multilingual, `BURST_SIM=0.86`) | Major-incident banner + escalate |
-| Any head below its confidence floor (type 0.35, queue 0.50, priority 0.60) | Human review |
-| Best precedent < 0.9305 or mean top-3 < 0.9224 | Human review (no precedent) |
+| Outage words + urgency words (e.g. "keeps dropping" + "immediately") | Escalate to on-call |
+| Any head below its confidence floor (type 0.75, queue 0.50, priority 0.70) | Human review |
+| Best precedent < 0.865 or mean top-3 < 0.845 (calibrated on hand-typed tickets) | Human review (no precedent) |
 | Refund / compensation request with no precedent that mentions it | Human review |
 | Empty, emoji-only or bare-URL ticket | Human review |
 
@@ -106,9 +107,9 @@ Thresholds were chosen by `scripts/gate_sweep.py` on the 2,286-ticket KB validat
 advance (≥95% of high-priority Incidents escalated, ≥25% auto-drafted, then the best queue accuracy on auto-drafted
 tickets).
 
-- **26.5%** of tickets are auto-drafted.
-- **95.3%** of high-priority Incidents are escalated.
-- Queue accuracy on auto-drafted tickets is **0.827**, against 0.609 on all tickets.
+- **25.2%** of tickets are auto-drafted.
+- **97.0%** of high-priority Incidents are escalated.
+- Queue accuracy on auto-drafted tickets is **0.815**, against 0.609 on all tickets.
 
 PII is masked with the dataset's own tokens (`<email>`, `<tel_num>`, `<acc_num>`) before any external call.
 Attack table: `reports/attack_table.md` (26/26).

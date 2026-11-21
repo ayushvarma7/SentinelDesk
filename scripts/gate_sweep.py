@@ -1,14 +1,19 @@
-"""OWNER: P3. Picks the gate thresholds on the 10% KB validation slice P1 held out (never the holdout).
+"""OWNER: P3. Picks the gate's confidence thresholds on the 10% KB validation slice P1 held out
+(never the holdout).
 
     PYTHONPATH=src python scripts/gate_sweep.py
 
 * Validation slice = first 10% of RandomState(RANDOM_SEED).permutation(len(kb)), the exact rows
   scripts/train_classifier.py kept out of heads.joblib, so classifier confidences are honest.
-* Retrieval is query ("query: ", the vector the pipeline computes) against the KB passage index
-  ("passage: ", artifacts/kb_embeddings.npy, the scaffold's Track B index). Each ticket's own KB row is
-  excluded, so similarity is honest too. If kb_embeddings.npy is missing it is built here and cached
-  with artifacts/kb_ids.npy (same file and convention retrieve.build_index() is meant to write).
-* Every combination goes through the real gate.evaluate() with the top-3 precedents and their answers.
+* Retrieval is the REAL retrieve.search() (P2's index, queue filter, cross-lingual slot, dedup),
+  with include_live=False and each ticket's own KB row removed from its results.
+* Every combination goes through the real gate.evaluate() with the retrieved precedents.
+
+Similarity floors are NOT swept here. KB tickets sit unusually close to each other (the dataset is
+synthetic): validation top-1 p25 is 0.931, but hand-typed in-domain tickets score 0.845-0.90.
+Floors picked from KB percentiles escalate 100% of what a person types. So MIN_TOP1_SIMILARITY /
+MIN_MEAN_TOP3_SIMILARITY stay at the hand-typed calibration in config.py (P2, docs/p3_workdone.md),
+and the sweep picks the confidence floors under those fixed similarity floors.
 
 Selection rule, fixed BEFORE the sweep ran:
   1. at least 95% of true high-priority Incidents escalated,
@@ -24,43 +29,35 @@ import time
 import numpy as np
 import pandas as pd
 
-from sentineldesk import classify, config, gate
+from sentineldesk import classify, config, gate, retrieve
 from sentineldesk.data import build_text, load_kb
-from sentineldesk.schema import Precedent, Prediction
+from sentineldesk.schema import Prediction
 
 REPORTS = config.ROOT / "reports"
-PASSAGE_EMB = config.ARTIFACTS / "kb_embeddings.npy"
-PASSAGE_IDS = config.ARTIFACTS / "kb_ids.npy"
 
-# The plan's 3x3x3x3 grid (type .35-.55, queue .20-.40, priority .30-.50, p5-p25) topped out at
-# 93.6% high-Incident escalation with this classifier (its confidences are higher than the TF-IDF
-# baseline's), so no point met rule 1. The grid was widened upward; the rule did not change.
+# The plan's grid (type .35-.55, queue .20-.40, priority .30-.50) cannot reach 95% high-Incident
+# escalation with this classifier (its confidences are higher than the TF-IDF baseline's), so the
+# grid extends upward. The rule did not change.
 CONF_GRID = {"type": (0.35, 0.45, 0.55, 0.65, 0.75), "queue": (0.20, 0.30, 0.40, 0.50),
              "priority": (0.30, 0.40, 0.50, 0.60, 0.70)}
-SIM_PCTS = (5, 10, 25, 40)
 
 
-def load_or_encode(path, ids_path, kb, texts, is_query):
-    ids = kb["ticket_id"].to_numpy(dtype=str)
-    if path.exists() and ids_path.exists() and np.array_equal(np.load(ids_path), ids):
-        print(f"[sweep] reusing {path.name}")
-        return np.load(path)
-    from sentineldesk.embed import encode
-    print(f"[sweep] encoding {len(texts):,} KB tickets (is_query={is_query}) -> {path.name}")
-    E = encode(list(texts), is_query=is_query, show_progress=True)
-    config.ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    np.save(path, E)
-    np.save(ids_path, ids)
-    return E
+def kb_query_embeddings(kb, texts):
+    ids_path = config.KB_QUERY_EMB_PATH.with_name("kb_query_ids.npy")
+    if not (config.KB_QUERY_EMB_PATH.exists() and ids_path.exists()
+            and np.array_equal(np.load(ids_path), kb["ticket_id"].to_numpy(dtype=str))):
+        raise SystemExit("artifacts/kb_query_embeddings.npy missing or stale: "
+                         "run PYTHONPATH=src python scripts/train_classifier.py first")
+    return np.load(config.KB_QUERY_EMB_PATH)
 
 
 def main() -> None:
     REPORTS.mkdir(exist_ok=True)
+    if not retrieve.is_ready():
+        retrieve.build_index()
     kb = load_kb()
     texts = np.array([build_text(s, b) for s, b in zip(kb["subject"], kb["body"])], dtype=object)
-    Eq = load_or_encode(config.KB_QUERY_EMB_PATH, config.KB_QUERY_EMB_PATH.with_name("kb_query_ids.npy"),
-                        kb, texts, is_query=True)
-    Ep = load_or_encode(PASSAGE_EMB, PASSAGE_IDS, kb, texts, is_query=False)
+    Eq = kb_query_embeddings(kb, texts)
 
     perm = np.random.RandomState(config.RANDOM_SEED).permutation(len(kb))
     val = perm[: max(1, int(config.VAL_FRACTION * len(kb)))]        # same slice as train_classifier.py
@@ -74,38 +71,35 @@ def main() -> None:
         idx = classify.decide(classes, P, h, bundle["high_threshold"])
         preds[h] = (classes[idx], P[np.arange(len(idx)), idx])
 
-    # query -> passage retrieval, excluding the ticket's own row
-    with np.errstate(all="ignore"):     # macOS Accelerate emits spurious matmul warnings
-        S = Eq[val] @ Ep.T
-    S[np.arange(len(val)), val] = -np.inf
-    top = np.argsort(-S, axis=1)[:, : config.TOP_K]
-    top_s = np.take_along_axis(S, top, axis=1)
-    top1, mean3 = top_s[:, 0], top_s[:, :3].mean(1)
-
-    precs = [[Precedent(str(kb.at[j, "ticket_id"]), float(top_s[i, r]), str(kb.at[j, "subject"] or ""),
-                        "", str(kb.at[j, "answer"]), str(kb.at[j, "language"]), str(kb.at[j, "queue"]))
-              for r, j in enumerate(top[i, :3])] for i in range(len(val))]
+    t0 = time.time()
+    precs = []
+    for i, j in enumerate(val):
+        hits = retrieve.search(Eq[j], config.TOP_K + 1, str(preds["queue"][0][i]), include_live=False,
+                               language=str(preds["language"][0][i]))
+        precs.append([p for p in hits if p.ticket_id != kb.at[j, "ticket_id"]][: config.TOP_K])
+    print(f"[sweep] retrieval for {len(val):,} tickets in {time.time() - t0:.0f}s")
+    top1 = np.array([p[0].score for p in precs])
+    mean3 = np.array([np.mean([x.score for x in p[:3]]) for p in precs])
     heads = [{h: Prediction(str(preds[h][0][i]), float(preds[h][1][i])) for h in ("type", "queue", "priority")}
              for i in range(len(val))]
 
-    pct1 = {q: float(np.percentile(top1, q)) for q in SIM_PCTS}
-    pct3 = {q: float(np.percentile(mean3, q)) for q in SIM_PCTS}
-    print("[sweep] top-1 similarity percentiles:", {f"p{q}": round(x, 4) for q, x in pct1.items()})
-    print("[sweep] mean top-3 similarity percentiles:", {f"p{q}": round(x, 4) for q, x in pct3.items()})
+    pcts = (5, 10, 25)
+    print("[sweep] validation top-1 similarity:", {f"p{q}": round(float(np.percentile(top1, q)), 4) for q in pcts})
+    print(f"[sweep] fixed floors: top-1 {config.MIN_TOP1_SIMILARITY}, mean top-3 {config.MIN_MEAN_TOP3_SIMILARITY} "
+          f"(fire on {np.mean(top1 < config.MIN_TOP1_SIMILARITY):.1%} / "
+          f"{np.mean(mean3 < config.MIN_MEAN_TOP3_SIMILARITY):.1%} of validation tickets)")
 
     true_hi = ((v["priority"] == "high") & (v["type"] == "Incident")).to_numpy()
     queue_ok = preds["queue"][0] == v["queue"].to_numpy(dtype=object)
 
     rows = []
     t0 = time.time()
-    for ct, cq, cp, q in itertools.product(*CONF_GRID.values(), SIM_PCTS):
-        th = {"min_confidence": {"type": ct, "queue": cq, "priority": cp},
-              "min_top1_similarity": pct1[q], "min_mean_top3_similarity": pct3[q]}
+    for ct, cq, cp in itertools.product(*CONF_GRID.values()):
+        th = {"min_confidence": {"type": ct, "queue": cq, "priority": cp}}
         esc = np.array([gate.evaluate(vt[i], heads[i]["type"], heads[i]["queue"], heads[i]["priority"],
                                       precs[i], th)[0] for i in range(len(val))])
         auto = ~esc
-        rows.append({"type": ct, "queue": cq, "priority": cp, "min_sim_pct": q,
-                     "min_top1_similarity": round(pct1[q], 4), "min_mean_top3_similarity": round(pct3[q], 4),
+        rows.append({"type": ct, "queue": cq, "priority": cp,
                      "auto_share": round(float(auto.mean()), 3),
                      "high_incident_escalated": round(float(esc[true_hi].mean()), 3),
                      "auto_queue_accuracy": round(float(queue_ok[auto].mean()), 3) if auto.any() else 0.0})
@@ -124,11 +118,13 @@ def main() -> None:
         "n_val": int(len(val)),
         "rule": "high_incident_escalated >= 0.95 and auto_share >= 0.25, then max auto_queue_accuracy",
         "n_meeting_rule": int(len(ok)),
-        "top1_sim_percentiles": {f"p{q}": round(x, 4) for q, x in pct1.items()},
-        "mean_top3_sim_percentiles": {f"p{q}": round(x, 4) for q, x in pct3.items()},
+        "retrieval": "retrieve.search(include_live=False), own row removed",
+        "top1_sim_percentiles": {f"p{q}": round(float(np.percentile(top1, q)), 4) for q in pcts},
+        "fixed_similarity_floors": {"min_top1_similarity": config.MIN_TOP1_SIMILARITY,
+                                    "min_mean_top3_similarity": config.MIN_MEAN_TOP3_SIMILARITY},
         "overall_queue_accuracy": round(float(queue_ok.mean()), 3),
         "true_high_incidents": int(true_hi.sum()),
-        "chosen": {k: (v_.item() if hasattr(v_, "item") else v_) for k, v_ in best.to_dict().items()},
+        "chosen": {k: (x.item() if hasattr(x, "item") else x) for k, x in best.to_dict().items()},
     }
     (REPORTS / "gate_sweep.json").write_text(json.dumps(summary, indent=2))
     print(df.sort_values("auto_queue_accuracy", ascending=False).head(10).to_string(index=False))

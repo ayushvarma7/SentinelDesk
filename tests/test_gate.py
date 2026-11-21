@@ -86,8 +86,16 @@ def test_too_little_text_escalates():
 
 def test_burst_reason():
     esc, reasons = gate.evaluate("VPN down", **CONFIDENT, precedents=GOOD_PRECS, thresholds=TH,
-                                 burst={"active": True, "related": ["LIVE-0001", "LIVE-0002"]})
+                                 burst={"active": True, "related": ["NEW-0001", "NEW-0002"]})
     assert esc and any("major incident" in r for r in reasons)
+
+
+def test_urgent_outage_goes_on_call():
+    text = "Since 7am our VPN keeps dropping. Patient care is affected, please escalate immediately."
+    esc, reasons = gate.evaluate(text, **CONFIDENT, precedents=GOOD_PRECS, thresholds=TH)
+    assert esc and any("on-call" in r for r in reasons), reasons
+    for calm in ["The VPN keeps dropping now and then, no rush.", "Urgent: please update my invoice address."]:
+        assert not gate.urgent_outage(calm), calm
 
 
 def test_pii_dataset_tokens():

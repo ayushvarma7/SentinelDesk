@@ -18,7 +18,7 @@ EMBED_DIM = 384
 QUERY_PREFIX = "query: "
 PASSAGE_PREFIX = "passage: "
 
-LLM_MODEL = "claude-haiku-5-5"      # switch to claude-sonnet-5-5 if German quality disappoints
+LLM_MODEL = "gemini-3.8-flash"   # P2.1: 2.5-flash is closed to new keys (404)
 LLM_MAX_TOKENS = 1024
 
 # --- triage classifier (Track A) ------------------------------------------------
@@ -31,29 +31,47 @@ HIGH_PRIORITY_TARGET_RECALL = 0.80   # P(high) threshold is the highest one reac
 HIGH_PRIORITY_THRESHOLD = 0.25       # value tuned by scripts/train_classifier.py (also stored in heads.joblib)
 VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).permutation(len(kb)); gate tuning reuses it
 
-# --- retrieval --------------------------------------------------------------
+# --- retrieval (Track B / P2) -----------------------------------------------
+KB_EMB_PATH = ARTIFACTS / "kb_embeddings.npy"        # KB encoded with is_query=False, for retrieval
+KB_META_PATH = ARTIFACTS / "kb_meta.parquet"         # same row order as KB_EMB_PATH
+
+# Live store: precedents added during a session (see retrieve.add_precedent).
+# Separate from the frozen index on purpose — evaluation passes include_live=False.
+LIVE_DIR = ARTIFACTS / "live"
+LIVE_EMB_PATH = LIVE_DIR / "live_embeddings.npy"
+LIVE_META_PATH = LIVE_DIR / "live_meta.parquet"
 TOP_K = 5
 DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected
+
+# Places in the top-k reserved for a precedent in the OTHER language. e5 does
+# not bridge languages on its own: by DETECTED language only 1-3% of hits cross
+# over. 0 disables; evaluation passes 0 so metrics measure unaided retrieval.
+CROSS_LINGUAL_SLOTS = 1
 
 # --- escalation gate --------------------------------------------------------
 # EDA: the hard rule (high + Incident) alone fires on 17.2% of KB tickets, which is
 # already the top of the 15-25% target band. Keep the soft thresholds tight or the
 # overall escalation rate balloons past 40% and the copilot looks useless.
-# Owned by P3. Chosen by scripts/gate_sweep.py on the 10% KB validation slice (never the holdout)
-# with a rule fixed before the sweep: >=95% of high-priority Incidents escalated, >=25% auto-drafted,
-# then max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 26.5% auto-drafted,
-# 95.3% of high Incidents escalated, auto-drafted queue accuracy 0.827 vs 0.609 overall.
+# Owned by P3. Two sources, on purpose (docs/p3_workdone.md §3):
+#
+# Similarity floors: calibrated by P2 on HAND-TYPED tickets, not KB percentiles. The dataset is
+# synthetic and its own tickets sit unusually close to the KB (validation top-1 p25 0.918), while
+# hand-typed text scores: in-domain 0.845-0.906 | off-domain 0.855-0.864 | gibberish 0.833-0.851 |
+# off-topic (a recipe) 0.823. A KB-derived floor escalates 100% of judge input, so these are only
+# a weak off-topic filter (they fire on 0.1% of validation tickets).
+MIN_TOP1_SIMILARITY = 0.8650
+MIN_MEAN_TOP3_SIMILARITY = 0.8450
+#
+# Confidence floors: chosen by scripts/gate_sweep.py on the 10% KB validation slice (never the
+# holdout), through the real retrieve.search(), under the fixed similarity floors above, with a
+# rule fixed before the sweep: >=95% of high-priority Incidents escalated, >=25% auto-drafted, then
+# max queue accuracy on auto-drafted tickets. Result (reports/gate_sweep.json): 25.2% auto-drafted,
+# 97.0% of high Incidents escalated, auto-drafted queue accuracy 0.815 vs 0.609 overall.
 MIN_CONFIDENCE = {
-    "type": 0.35,
+    "type": 0.75,
     "queue": 0.50,      # 10 classes at 21x imbalance; queue ECE 0.012, so this floor is meaningful
-    "priority": 0.60,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
+    "priority": 0.70,   # catches true high tickets the P(high)=0.25 rule labelled medium/low
 }
-# e5 query->passage cosine on the KB index sits in a narrow high band (p5 0.912, p25 0.931).
-# These are the validation p25 of top-1 and mean top-3 similarity. They assume Track B's index is
-# config.EMBED_MODEL with "passage: " KB vectors (artifacts/kb_embeddings.npy); re-run
-# scripts/gate_sweep.py if retrieval changes model, prefixes or scoring.
-MIN_TOP1_SIMILARITY = 0.9305
-MIN_MEAN_TOP3_SIMILARITY = 0.9224
 
 # Requests that imply a commitment we cannot make without precedent.
 UNSUPPORTED_ACTION_PATTERNS = [

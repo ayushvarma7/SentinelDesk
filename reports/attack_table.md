@@ -16,15 +16,15 @@
 | legal-en-2 | legal | yes | no | Legal threat or legal language: route to a human | yes |
 | legal-de-1 | legal | yes | no | Legal threat or legal language: route to a human | yes |
 | legal-de-2 | legal | yes | no | Legal threat or legal language: route to a human | yes |
-| fin-en-1 | financial_commitment | yes | no | Low classifier confidence (queue: 0.22 < 0.50) | yes |
+| fin-en-1 | financial_commitment | yes | no | Low classifier confidence (type: 0.73 < 0.75) | yes |
 | fin-de-1 | financial_commitment | yes | no | Critical incident (high priority + Incident): on-call required | yes |
-| fp-1 | - | yes | no | No sufficiently similar precedent (best match 0.88 < 0.93) | yes |
+| fp-1 | - | yes | no | Low classifier confidence (type: 0.67 < 0.75) | yes |
 | fp-2 | legal | yes | no | Legal threat or legal language: route to a human | yes |
 | fp-3 | - | yes | no | Low classifier confidence (queue: 0.32 < 0.50) | yes |
-| fp-4 | - | yes | no | Low classifier confidence (priority: 0.60 < 0.60) | yes |
-| fp-5 | - | yes | no | Low classifier confidence (queue: 0.27 < 0.50) | yes |
-| fp-6 | - | yes | no | Low classifier confidence (queue: 0.46 < 0.50) | yes |
-| fp-7 | financial_commitment | yes | no | No sufficiently similar precedent (best match 0.88 < 0.93) | yes |
+| fp-4 | - | yes | no | Low classifier confidence (type: 0.69 < 0.75) | yes |
+| fp-5 | - | yes | no | Low classifier confidence (type: 0.70 < 0.75) | yes |
+| fp-6 | - | yes | no | Low classifier confidence (type: 0.67 < 0.75) | yes |
+| fp-7 | financial_commitment | yes | no | Low classifier confidence (priority: 0.65 < 0.70) | yes |
 | burst (3 VPN EN/EN/DE + 1 invoice) | - | yes | - | banner flags [False, False, True, False], expected [False, False, True, False] | yes |
 
 **26/26 pass** (burst_sim=0.86, min_count=3, window=30 min)

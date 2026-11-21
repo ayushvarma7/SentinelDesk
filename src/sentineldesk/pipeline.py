@@ -17,14 +17,37 @@ from .schema import Precedent, Prediction, TriageResult
 STAGES = {
     "embed": True,       # Track A wired embed.encode (Track B owns the file)
     "classify": True,    # Track A: falls back to the stub if artifacts/heads.joblib is missing
-    "retrieve": False,
-    "generate": False,
+    "retrieve": True,    # Track B: real index, stub fallback if artifacts are missing
+    "generate": True,    # Track C: Gemini when a key exists, extractive fallback otherwise
 }
 
 
 # Live-ticket memory for the major-incident banner (P3). Scripts call BURST.clear()
 # between evaluation tickets so they do not trigger it.
 BURST = BurstDetector()
+
+
+_LANGS = ("en", "de")
+# langdetect must win by this much before it overrides the language head.
+LANG_OVERRIDE_PROB = 0.90
+
+
+def _detected_language(text: str) -> tuple[str, float] | None:
+    """(lang, prob) from langdetect when it is confident the text is en/de, else None.
+
+    The language head learned the dataset's label, which disagrees with the text on ~12% of
+    tickets (German-labelled tickets written in English). Without this guard a plainly English
+    ticket can get a German reply (the hospital VPN demo ticket: head says de at 0.61).
+    """
+    try:
+        from langdetect import DetectorFactory, detect_langs
+        DetectorFactory.seed = 0
+        best = detect_langs(text)[0]
+    except Exception:
+        return None
+    if best.lang in _LANGS and best.prob >= LANG_OVERRIDE_PROB:
+        return best.lang, float(best.prob)
+    return None
 
 
 def _stub_predictions() -> dict[str, Prediction]:
@@ -52,8 +75,12 @@ def _stub_precedents() -> list[Precedent]:
 
 
 def triage(subject: str | None, body: str | None,
-           thresholds: dict | None = None) -> TriageResult:
-    """Triage one ticket. Safe on null subject, null body, and arbitrary length."""
+           thresholds: dict | None = None, track_burst: bool = True) -> TriageResult:
+    """Triage one ticket. Safe on null subject, null body, and arbitrary length.
+
+    track_burst=False keeps the ticket out of the burst detector. Evaluation scripts pass it so
+    their own batch of (often similar) tickets cannot raise a false major-incident banner.
+    """
     t0 = time.perf_counter()
     latency: dict[str, float] = {}
 
@@ -75,23 +102,46 @@ def triage(subject: str | None, body: str | None,
         preds = classify.predict(qvec, text)
     else:
         preds = _stub_predictions()
+    det = _detected_language(text) if len(text) >= 20 else None
+    if det and det[0] != preds["language"].label:
+        preds["language"] = Prediction(det[0], det[1], {**preds["language"].all_probs, "langdetect": det[1]})
     latency["classify"] = (time.perf_counter() - t) * 1000
 
     t = time.perf_counter()
-    precedents = _stub_precedents()      # TODO Track B
+    if STAGES["retrieve"] and qvec is not None:
+        from . import retrieve
+        if retrieve.is_ready():
+            precedents = retrieve.search(qvec, config.TOP_K, preds["queue"].label,
+                                         language=preds["language"].label)
+        else:
+            precedents = _stub_precedents()   # index not built yet
+    else:
+        precedents = _stub_precedents()
     latency["retrieve"] = (time.perf_counter() - t) * 1000
 
-    burst = BURST.check(qvec, sim=(thresholds or {}).get("burst_sim"))
+    burst = (BURST.check(qvec, sim=(thresholds or {}).get("burst_sim")) if track_burst
+             else {"active": False, "related": [], "live_id": None, "max_sim": 0.0})
     escalate, reasons = gate.evaluate(
         text, preds["type"], preds["queue"], preds["priority"], precedents, thresholds, burst
     )
 
     t = time.perf_counter()
+    engine = None
     if escalate:
+        # An escalated ticket gets no draft at all. Showing the operator a
+        # suggested reply next to "escalate to on-call" invites them to send it.
         draft_reply, cited, unverified = None, [], []
+    elif STAGES["generate"]:
+        from . import generate
+        d = generate.draft(masked_text, preds["language"].label, precedents)
+        draft_reply = d["reply"]
+        cited, unverified, engine = d["cited_ticket_ids"], d["unverified_claims"], d["engine"]
+        if not d["grounded"]:
+            escalate = True
+            reasons.append("Draft not grounded in the retrieved precedents")
+            draft_reply, cited = None, []
     else:
-        draft_reply = "[stub draft — Track C]"   # TODO Track C
-        cited, unverified = [p.ticket_id for p in precedents], []
+        draft_reply, cited, unverified = "[stub draft]", [p.ticket_id for p in precedents], []
     latency["generate"] = (time.perf_counter() - t) * 1000
     latency["total"] = (time.perf_counter() - t0) * 1000
 
@@ -110,4 +160,5 @@ def triage(subject: str | None, body: str | None,
         latency_ms=latency,
         risks=gate.detect_risks(text),
         burst=burst,
+        engine=engine,
     )

@@ -11,6 +11,7 @@ and German count as one burst. Pure numpy, no model loading.
 """
 from __future__ import annotations
 
+import threading
 import time
 from collections import deque
 
@@ -27,10 +28,12 @@ class BurstDetector:
         self.window_s = config.BURST_WINDOW_S if window_s is None else window_s
         self._recent: deque[tuple[str, float, np.ndarray]] = deque(maxlen=maxlen)
         self._n = 0
+        self._lock = threading.Lock()     # Streamlit and draft_eval call triage() from threads
 
     def clear(self) -> None:
         """Forget every recent ticket (evaluation scripts call this between tickets)."""
-        self._recent.clear()
+        with self._lock:
+            self._recent.clear()
 
     def __len__(self) -> int:
         return len(self._recent)
@@ -38,10 +41,14 @@ class BurstDetector:
     def check(self, vec: np.ndarray | None, now: float | None = None,
               sim: float | None = None) -> dict:
         """Record this ticket and return {"active", "related", "live_id", "max_sim"}."""
+        with self._lock:
+            return self._check(vec, now, sim)
+
+    def _check(self, vec, now, sim) -> dict:
         now = time.time() if now is None else now
         sim = self.sim if sim is None else sim
         self._n += 1
-        live_id = f"LIVE-{self._n:04d}"
+        live_id = f"NEW-{self._n:04d}"   # not LIVE-: that prefix is the live precedent store (retrieve.py)
         if vec is None:
             return {"active": False, "related": [], "live_id": live_id, "max_sim": 0.0}
         v = np.asarray(vec, np.float32).ravel()

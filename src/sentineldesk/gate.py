@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 
 from . import config
+from .generate import unsupported_figures  # noqa: F401  (P2 implements, gate re-exports)
 from .schema import Precedent, Prediction
 
 # Tuned on tests/test_adversarial.py: 25/25 attacks caught, 0 false alarms on the 7 look-alikes.
@@ -70,6 +71,23 @@ RISK_REASONS = {
     "legal": "Legal threat or legal language: route to a human",
 }
 
+# Explicit outage + urgency language: a critical incident even when the priority head says
+# "medium". Both must match. On the KB this fires on 0.55% of tickets, 83% of which are high
+# priority (base rate 39%) and 78% high-priority Incidents.
+_OUTAGE_RE = re.compile(
+    r"\b(outage|is down|are down|went down|keeps dropping|offline|not reachable|cannot reach|can't reach"
+    r"|unreachable|ausfall|ausgefallen|nicht erreichbar|funktioniert nicht mehr)\b", re.I)
+_URGENCY_RE = re.compile(
+    r"\b(immediately|urgent(ly)?|asap|critical|emergency|patient(s)?|production down|all users"
+    r"|sofort|dringend|kritisch|notfall)\b", re.I)
+
+
+def urgent_outage(text: str | None) -> bool:
+    """True when the ticket reports an outage AND uses urgency language. Pure function."""
+    t = text or ""
+    return bool(_OUTAGE_RE.search(t) and _URGENCY_RE.search(t))
+
+
 _ACTION_RE = [re.compile(p, re.I) for p in config.UNSUPPORTED_ACTION_PATTERNS]
 _LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
 
@@ -117,6 +135,8 @@ def evaluate(
     # 1. The brief's hard rule. EDA: fires on 17.2% of tickets on its own.
     if priority.label == "high" and type_.label == "Incident":
         reasons.append("Critical incident (high priority + Incident): on-call required")
+    elif urgent_outage(text):
+        reasons.append("Critical incident (reported outage with urgency): on-call required")
 
     # 1b. Many near-identical tickets in a short window: probably a major incident.
     if burst and burst.get("active"):
@@ -143,12 +163,12 @@ def evaluate(
         top1 = precedents[0].score
         if top1 < min_top1:
             reasons.append(
-                f"No sufficiently similar precedent (best match {top1:.2f} < {min_top1:.2f})"
+                f"No sufficiently similar precedent (best match {top1:.3f} < {min_top1:.3f})"
             )
         top3 = [p.score for p in precedents[:3]]
         mean3 = sum(top3) / len(top3)
         if mean3 < min_mean3:
-            reasons.append(f"Weak precedent support (mean top-3 {mean3:.2f} < {min_mean3:.2f})")
+            reasons.append(f"Weak precedent support (mean top-3 {mean3:.3f} < {min_mean3:.3f})")
 
     # 5. Commitments (refunds, SLA credits, cancellations) we cannot make unless a past
     #    resolution made them too. Not a hard block: refunds have real precedents.
