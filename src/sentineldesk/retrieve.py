@@ -21,6 +21,7 @@ from .schema import Precedent
 from .text import build_text
 
 _INDEX: dict | None = None
+_LIVE: dict | None = None
 
 META_COLUMNS = ["ticket_id", "subject", "body", "answer", "language", "queue", "type", "priority"]
 SNIPPET_CHARS = 240
@@ -68,6 +69,80 @@ def is_ready() -> bool:
     return config.KB_EMB_PATH.exists() and config.KB_META_PATH.exists()
 
 
+# --------------------------------------------------------------------------
+# Live store: precedents learned during a session.
+#
+# Kept in its own files, never merged into the frozen index, for three reasons:
+#   1. reproducibility — scripts/evaluate.py and retrieval_check.py pass
+#      include_live=False, so published metrics never depend on session state;
+#   2. leakage — a holdout ticket appended during a demo would otherwise end up
+#      answering its own question in the next evaluation run;
+#   3. it can be wiped between demo runs without rebuilding anything.
+#
+# Live ids are LIVE-xxxxx, deliberately distinct from the KB's TKT-xxxxx, so a
+# citation in a draft shows at a glance whether it came from history or from
+# something a human resolved minutes ago.
+# --------------------------------------------------------------------------
+
+def _empty_live() -> dict:
+    return {"matrix": np.zeros((0, config.EMBED_DIM), dtype=np.float32),
+            "meta": pd.DataFrame(columns=META_COLUMNS)}
+
+
+def load_live() -> dict:
+    global _LIVE
+    if _LIVE is None:
+        if config.LIVE_EMB_PATH.exists() and config.LIVE_META_PATH.exists():
+            _LIVE = {"matrix": np.load(config.LIVE_EMB_PATH).astype(np.float32),
+                     "meta": pd.read_parquet(config.LIVE_META_PATH)}
+        else:
+            _LIVE = _empty_live()
+    return _LIVE
+
+
+def live_count() -> int:
+    return len(load_live()["meta"])
+
+
+def clear_live() -> None:
+    """Wipe the session store. Does not touch the frozen index."""
+    global _LIVE
+    _LIVE = _empty_live()
+    for p in (config.LIVE_EMB_PATH, config.LIVE_META_PATH):
+        p.unlink(missing_ok=True)
+
+
+def add_precedent(subject: str | None, body: str | None, answer: str,
+                  language: str, queue: str = "", type_: str = "") -> str:
+    """Add a resolved ticket to the live store and return its LIVE-xxxxx id.
+
+    This is the escalation loop closing: the gate says "no precedent", a human
+    resolves it, and the resolution becomes retrievable for the next ticket.
+    Costs one encode (~11 ms) — there is no index to rebuild.
+    """
+    from . import embed
+
+    answer = (answer or "").strip()
+    if not answer:
+        raise ValueError("a precedent needs an answer; that is the whole point of it")
+
+    live = load_live()
+    ticket_id = f"LIVE-{len(live['meta']) + 1:05d}"
+    text = build_text(subject, body)
+    vec = embed.encode([text], is_query=False)[0]
+
+    row = {"ticket_id": ticket_id, "subject": subject or "", "body": body or "",
+           "answer": answer, "language": language, "queue": queue, "type": type_,
+           "priority": ""}
+    live["matrix"] = np.vstack([live["matrix"], vec[None, :]]).astype(np.float32)
+    live["meta"] = pd.concat([live["meta"], pd.DataFrame([row])], ignore_index=True)
+
+    config.LIVE_DIR.mkdir(parents=True, exist_ok=True)
+    np.save(config.LIVE_EMB_PATH, live["matrix"])
+    live["meta"].to_parquet(config.LIVE_META_PATH, index=False)
+    return ticket_id
+
+
 def _row_to_precedent(row: pd.Series, score: float) -> Precedent:
     body = str(row.get("body") or "")
     return Precedent(
@@ -81,20 +156,11 @@ def _row_to_precedent(row: pd.Series, score: float) -> Precedent:
     )
 
 
-def search(query_vec: np.ndarray, k: int | None = None,
-           queue_filter: str | None = None) -> list[Precedent]:
-    """Top-k precedents, highest score first.
-
-    Vectors are L2-normalized, so the dot product is cosine similarity.
-    queue_filter narrows to a predicted department but falls back to the whole
-    index whenever that would return fewer than k hits — a wrong queue
-    prediction must never starve retrieval.
-    """
-    k = k or config.TOP_K
-    idx = load_index()
-    matrix, meta = idx["matrix"], idx["meta"]
-
-    q = np.asarray(query_vec, dtype=np.float32).reshape(-1)
+def _candidates(store: dict, q: np.ndarray, k: int, queue_filter: str | None):
+    """Top candidates from one store as a list of (score, row_index)."""
+    matrix, meta = store["matrix"], store["meta"]
+    if len(matrix) == 0:
+        return []
     # Apple's Accelerate BLAS leaves FP exception flags set, so numpy reports
     # spurious divide-by-zero/overflow warnings here. Verified: inputs and
     # outputs are finite and normalized.
@@ -104,23 +170,48 @@ def search(query_vec: np.ndarray, k: int | None = None,
     rows = np.arange(len(meta))
     if queue_filter:
         mask = (meta["queue"].to_numpy() == queue_filter).nonzero()[0]
-        # Over-fetch before dedup, and only trust the filter if it is roomy enough.
+        # Only trust the filter if it leaves room; a wrong queue prediction
+        # (macro-F1 0.61) must never starve retrieval.
         if len(mask) >= k * 4:
             rows = mask
 
     pool = min(len(rows), max(k * 6, 30))
     local = np.argpartition(-sims[rows], kth=pool - 1)[:pool]
     local = local[np.argsort(-sims[rows][local])]
-    candidates = rows[local]
+    return [(float(sims[i]), int(i)) for i in rows[local]]
+
+
+def search(query_vec: np.ndarray, k: int | None = None,
+           queue_filter: str | None = None,
+           include_live: bool = True) -> list[Precedent]:
+    """Top-k precedents across the frozen KB and the live store, best first.
+
+    Vectors are L2-normalized, so the dot product is cosine similarity.
+
+    include_live=False is mandatory for anything that produces a published
+    number — scripts/evaluate.py, scripts/retrieval_check.py — so metrics never
+    depend on what someone typed into the console.
+    """
+    k = k or config.TOP_K
+    q = np.asarray(query_vec, dtype=np.float32).reshape(-1)
+
+    frozen = load_index()
+    pools = [(frozen, s, i) for s, i in _candidates(frozen, q, k, queue_filter)]
+    if include_live:
+        live = load_live()
+        pools += [(live, s, i) for s, i in _candidates(live, q, k, queue_filter)]
+    pools.sort(key=lambda t: -t[1])
 
     # Drop near-identical precedents: templated answers make five copies of one
-    # resolution look like five independent sources, which is misleading on screen.
-    picked: list[int] = []
-    for i in candidates:
+    # resolution look like five independent sources, which misleads on screen.
+    picked: list[tuple[dict, float, int]] = []
+    for store, score, i in pools:
         if len(picked) >= k:
             break
-        if any(float(matrix[i] @ matrix[j]) >= config.DEDUP_SIMILARITY for j in picked):
+        vec = store["matrix"][i]
+        if any(float(vec @ s2["matrix"][j]) >= config.DEDUP_SIMILARITY
+               for s2, _, j in picked):
             continue
-        picked.append(int(i))
+        picked.append((store, score, i))
 
-    return [_row_to_precedent(meta.iloc[i], sims[i]) for i in picked]
+    return [_row_to_precedent(store["meta"].iloc[i], score) for store, score, i in picked]

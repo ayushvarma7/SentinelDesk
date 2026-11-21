@@ -34,6 +34,12 @@ VAL_FRACTION = 0.10                  # first 10% of RandomState(RANDOM_SEED).per
 # --- retrieval (Track B / P2) -----------------------------------------------
 KB_EMB_PATH = ARTIFACTS / "kb_embeddings.npy"        # KB encoded with is_query=False, for retrieval
 KB_META_PATH = ARTIFACTS / "kb_meta.parquet"         # same row order as KB_EMB_PATH
+
+# Live store: precedents added during a session (see retrieve.add_precedent).
+# Separate from the frozen index on purpose — evaluation passes include_live=False.
+LIVE_DIR = ARTIFACTS / "live"
+LIVE_EMB_PATH = LIVE_DIR / "live_embeddings.npy"
+LIVE_META_PATH = LIVE_DIR / "live_meta.parquet"
 TOP_K = 5
 DEDUP_SIMILARITY = 0.98             # drop a precedent this close to one already selected
 
