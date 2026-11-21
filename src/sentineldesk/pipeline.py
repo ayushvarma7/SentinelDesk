@@ -187,52 +187,6 @@ def triage(subject: str | None, body: str | None,
     )
 
 
-def triage_ticket(subject: str | None, body: str | None,
-                  thresholds: dict | None = None) -> dict:
-    """Dict-shaped adapter for the Streamlit console (frontend-ui).
-
-    The UI resolves SENTINEL_BACKEND, default "sentineldesk.pipeline:triage_ticket",
-    and expects the same shape mock_desk.triage_ticket returns. Without this it
-    cannot import a callable by that name, catches the error, and SILENTLY falls
-    back to the mock — so the console looks like it works while showing invented
-    data. Keep the keys below in step with sentinel_ui.common.normalize_result().
-
-    triage() and TriageResult remain the real contract; this is a thin projection.
-    """
-    r = triage(subject, body, thresholds=thresholds)
-
-    def pred(p) -> dict:
-        return {"label": p.label, "confidence": round(float(p.confidence), 4)}
-
-    return {
-        "language": r.language,
-        "type": pred(r.type),
-        "queue": pred(r.queue),
-        "priority": pred(r.priority),
-        "escalation": {"escalate": bool(r.escalate), "reasons": list(r.escalation_reasons)},
-        "retrieved": [
-            {"ticket_id": p.ticket_id,
-             "similarity": round(float(p.score), 4),
-             "language": p.language,
-             "subject": p.subject,
-             "answer_snippet": p.answer[:450]}
-            for p in r.precedents
-        ],
-        "draft": r.draft_reply,
-        "cited_ids": list(r.cited_ticket_ids),
-        # masked_pii is {kind: count}; the UI wants a flat list of what was found.
-        "pii_found": [k for k, n in (r.masked_pii or {}).items() if n],
-        "latency_ms": {
-            "triage": round(r.latency_ms.get("embed", 0.0) + r.latency_ms.get("classify", 0.0), 1),
-            "retrieval": round(r.latency_ms.get("retrieve", 0.0), 1),
-            "generation": round(r.latency_ms.get("generate", 0.0), 1),
-            "total": round(r.latency_ms.get("total", 0.0), 1),
-        },
-        "engine": r.engine,
-        "unverified_claims": list(r.unverified_claims),
-    }
-
-
 def resolve_ticket(subject: str | None, body: str | None, resolution: str,
                    resolved_by: str, queue: str | None = None,
                    type_: str | None = None, language: str | None = None) -> dict:
